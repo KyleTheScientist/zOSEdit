@@ -40,6 +40,14 @@ class Editor:
             dpg.add_key_press_handler(dpg.mvKey_S, callback=self.save_keybind)
             dpg.add_key_press_handler(dpg.mvKey_Tab, callback=self.switch_tab_keybind)
 
+    def hide(self):
+        dpg.hide_item('editor')
+        for tab in self.tabs:
+            if tab is not self.empty_tab:
+                dpg.hide_item(tab.id)
+
+        self.tabs = [self.empty_tab]
+
     def on_editor_changed(self):
         self.get_current_tab().mark_dirty()
 

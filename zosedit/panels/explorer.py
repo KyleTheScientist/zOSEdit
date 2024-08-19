@@ -14,6 +14,11 @@ class Explorer:
                                on_enter=True, callback=self.refresh, width=260, uppercase=True)
             dpg.add_button(label=' O ', callback=self.refresh)
 
+    def hide(self):
+        dpg.hide_item('explorer_search_group')
+        if dpg.does_item_exist('results'):
+            dpg.delete_item('results')
+
     def refresh(self):
         # Get datasets
         search = dpg.get_value('explorer_search_input')
@@ -61,8 +66,14 @@ class Explorer:
     def populate_pds(self, dataset: Dataset, id: int):
         if dataset._populated:
             return
-        for member in self.root.ftp.get_members(dataset):
+        members = self.root.ftp.get_members(dataset)
+        if not members:
+            dpg.add_text('No members found', parent=id, indent=10)
+            return
+
+        for member in members:
             self.leaf(dataset=dataset, member=member, parent=id, indent=10)
+
 
     def _populate_pds(self, dataset: Dataset, parent: int):
         return lambda: self.populate_pds(dataset, parent)

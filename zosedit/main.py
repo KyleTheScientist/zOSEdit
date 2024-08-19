@@ -4,7 +4,11 @@ import zosedit.panels.editor as editor
 
 from zosedit.constants import tempdir
 from zosedit.zftp import zFTP
-from os import startfile
+
+import platform
+
+if platform.system() == 'Windows':
+    from os import startfile
 
 class Root:
 
@@ -22,9 +26,11 @@ class Root:
                 with dpg.menu(label="File"):
                     dpg.add_menu_item(label="New", shortcut="Ctrl+N", callback=self.editor.new_file)
                     dpg.add_menu_item(label="Save", shortcut="Ctrl+S", callback=self.editor.save_file)
-                    dpg.add_menu_item(label="Open Data Directory", callback=self.open_data_directory)
-                with dpg.menu(label="Edit"):
+                    if platform.system() == 'Windows':
+                        dpg.add_menu_item(label="Open Data Directory", callback=self.open_data_directory)
+                with dpg.menu(label="Session"):
                     dpg.add_menu_item(label="Login", callback=self.login)
+                    dpg.add_menu_item(label="Logout", callback=self.logout)
 
             width = dpg.get_viewport_width()
             with dpg.group(horizontal=True):
@@ -41,6 +47,12 @@ class Root:
         dpg.show_viewport()
         dpg.start_dearpygui()
         dpg.destroy_context()
+
+    def logout(self):
+        self.ftp.quit()
+        self.ftp = None
+        self.editor.hide()
+        self.explorer.hide()
 
     def login(self):
         def _login():
@@ -83,5 +95,8 @@ class Root:
 
 root = Root()
 
-if __name__ == '__main__':
+def main():
     root.start()
+
+if __name__ == '__main__':
+    main()

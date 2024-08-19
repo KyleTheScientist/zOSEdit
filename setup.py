@@ -16,7 +16,7 @@ readme = Path(__file__).parent / 'README.md'
 setup(
     name='zosedit',
     version='0.0.1',
-    description='MVS Dataset Editor',
+    description='FTP-based MVS Dataset Editor',
     long_description=readme.read_text(),
     long_description_content_type='text/markdown',
     author='KyleTheScientist',
@@ -24,11 +24,10 @@ setup(
     url='https://github.com/KyleTheScientist/zOSEdit',
     packages=find_packages(),
     install_requires=[
-        'ahk',
-        'ahk[binary]',
         'dearpygui',
     ],
-    keywords=['gui', 'popup', 'dearpygui', 'autohotkey'],
+    entry_points={'console_scripts': ['zosedit=zosedit.main:main']},
+    keywords=['editor', 'z/OS', 'MVS', 'dataset', 'FTP'],
     classifiers=[
         'Intended Audience :: Developers',
         'Operating System :: Microsoft :: Windows',
