@@ -1,6 +1,6 @@
 '''
 To build the package, run:
-    pip install --upgrade build && rm dist/*; python -m build
+    rm dist/*; pip install --upgrade build && python -m build
 
 The built package will be in the dist/ directory
 
@@ -15,7 +15,7 @@ readme = Path(__file__).parent / 'README.md'
 
 setup(
     name='zosedit',
-    version='0.0.3',
+    version='0.0.4',
     description='FTP-based MVS Dataset Editor',
     long_description=readme.read_text(),
     long_description_content_type='text/markdown',

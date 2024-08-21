@@ -25,7 +25,7 @@ class Root:
             with dpg.menu_bar():
                 with dpg.menu(label="File"):
                     dpg.add_menu_item(label="New", shortcut="Ctrl+N", callback=self.editor.new_file)
-                    dpg.add_menu_item(label="Save", shortcut="Ctrl+S", callback=self.editor.save_file)
+                    dpg.add_menu_item(label="Save", shortcut="Ctrl+S", callback=self.editor.save_open_file)
                     if platform.system() == 'Windows':
                         dpg.add_menu_item(label="Open Data Directory", callback=self.open_data_directory)
                 with dpg.menu(label="Session"):
@@ -75,7 +75,7 @@ class Root:
 
         if dpg.does_item_exist('login_dialog'):
             dpg.delete_item('login_dialog')
-        w, h = 300, 150
+        w, h = 420, 150
         # Create new dialog
         with dpg.window(tag='login_dialog', label='Login', width=w, height=h, modal=True, popup=True):
             kwargs = {'on_enter': True, 'callback': _login, 'width': -1}

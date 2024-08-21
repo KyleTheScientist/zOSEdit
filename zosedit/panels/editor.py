@@ -1,23 +1,83 @@
 from dearpygui import dearpygui as dpg
-from zosedit.dataset import Dataset
+from zosedit.models import Dataset, Job
 from zosedit.constants import tempdir
+from zosedit.zftp import zFTP
 from pathlib import Path
-
 
 class Tab:
 
-    def __init__(self, path: Path, id: int, dataset_metadata: Dataset):
-        self.local_path = path
-        self.id = id
-        self.dataset_metadata = dataset_metadata
+    def __init__(self, *, ftp: zFTP = None, dataset: Dataset = None, job: Job = None):
+        self.ftp = ftp
+        self.dataset = dataset
+        self.job = job
         self.dirty = False
+        self.uuid = None
+
+        if dataset:
+            self.build_dataset_tab()
+        elif job:
+            self.build_job_tab()
+        else:
+            self.uuid = dpg.add_tab(label='   ', closable=False, parent='editor_tab_bar')
+
+    def build_dataset_tab(self):
+        if self.uuid:
+            for child in dpg.get_item_children(self.uuid)[1]:
+                dpg.delete_item(child)
+        else:
+            self.uuid = dpg.add_tab(label=self.dataset.name, closable=True, parent='editor_tab_bar')
+
+        dpg.set_value('editor_tab_bar', self.uuid)
+
+        if self.dataset.new:
+            self.mark_dirty()
+        else:
+            status = dpg.add_text('Downloading...', parent=self.uuid)
+            local_path = self.ftp.download_file(self.dataset.name)
+            self.dataset.local_path = local_path
+            dpg.delete_item(status)
+
+        content = self.dataset.local_path.read_text()
+        lines = [line.rstrip() for line in content.split('\n')]
+
+        self.editor = dpg.add_input_text(
+            parent=self.uuid,
+            multiline=True,
+            width=-1,
+            height=-1,
+            callback=self.mark_dirty,
+            user_data=self)
+        dpg.set_value(self.editor, '\n'.join(lines))
+
+    def build_job_tab(self):
+        label = f'{self.job.name} ({self.job.id})'
+        if self.uuid:
+            for child in dpg.get_item_children(self.uuid)[1]:
+                dpg.delete_item(child)
+        else:
+            self.uuid = dpg.add_tab(label=label, closable=True, parent='editor_tab_bar')
+        dpg.set_value('editor_tab_bar', self.uuid)
+        dpg.add_text(self.job.string, parent=self.uuid)
+        status = dpg.add_text('Downloading spool output...', parent=self.uuid)
+        spools = self.ftp.download_spools(self.job)
+        dpg.delete_item(status)
+        self.job.spools = spools
+
+        for spool in self.job.spools:
+            with dpg.collapsing_header(label=spool.ddname, parent=self.uuid, user_data=spool):
+                dpg.add_text(spool.local_path.read_text())
 
     def mark_dirty(self):
-        dpg.configure_item(self.id, label=self.dataset_metadata.name + '*')
+        dpg.configure_item(self.uuid, label=self.dataset.name + '*')
         self.dirty = True
 
+    def mark_clean(self):
+        dpg.configure_item(self.uuid, label=self.dataset.name)
+        self.dirty = False
+        self.dataset.new = False
+
     def __repr__(self):
-        return f"Tab({self.local_path}, {self.id}, {dpg.get_item_rect_min(self.id)})"
+        return f"Tab({self.local_path}, {self.uuid}, {dpg.get_item_rect_min(self.uuid)})"
 
 
 class Editor:
@@ -28,11 +88,8 @@ class Editor:
 
     def build(self):
         with dpg.tab_bar(tag='editor_tab_bar', reorderable=True, callback=self.on_tab_changed):
-            id = dpg.add_tab(label='...', closable=False)
-            self.empty_tab = Tab(None, id, None)
+            self.empty_tab = Tab()
             self.tabs.append(self.empty_tab)
-        dpg.add_input_text(tag="editor", parent='win_editor', show=False,
-                               multiline=True, width=-1, height=-1, callback=self.on_editor_changed)
 
         with dpg.handler_registry():
             dpg.add_key_press_handler(dpg.mvKey_N, callback=self.new_file_keybind)
@@ -44,19 +101,38 @@ class Editor:
         dpg.hide_item('editor')
         for tab in self.tabs:
             if tab is not self.empty_tab:
-                dpg.hide_item(tab.id)
+                dpg.hide_item(tab.uuid)
 
         self.tabs = [self.empty_tab]
 
-    def on_editor_changed(self):
-        self.get_current_tab().mark_dirty()
-
     def on_tab_changed(self):
         self.update_internal_state()
-        tab = dpg.get_value('editor_tab_bar')
-        tab = self.get_tab_by_id(tab)
-        if tab:
+
+    # Jobs
+    def open_job(self, job: Job):
+        tab = self.get_tab_by_job(job)
+        if not tab:
+            tab = Tab(ftp=self.root.ftp, job=job)
+            self.tabs.append(tab)
+        elif tab.dirty:
             self.switch_to_tab(tab)
+        else:
+            tab.build_job_tab()
+        self.switch_to_tab(tab)
+
+    # Files
+    def open_file(self, dataset: Dataset):
+        tab = self.get_tab_by_dataset(dataset.name)
+        if not tab:
+            tab = Tab(ftp=self.root.ftp, dataset=dataset)
+            self.tabs.append(tab)
+        elif tab.dirty:
+            self.switch_to_tab(tab)
+        else:
+            tab.build_dataset_tab()
+        self.switch_to_tab(tab)
+        if dataset.new:
+            self.get_current_tab().mark_dirty()
 
     def new_file(self):
         # Callback for creating a new file
@@ -67,15 +143,16 @@ class Editor:
             type_ = 'PO' if type_ == 'PDS' else 'PS'
 
             dataset = Dataset(dataset_name)
+            dataset.new = True
+            dataset.local_path = Path(tempdir, dataset_name)
+            dataset.local_path.write_text('')
             dataset.record_length = 80 # HACK
             dataset.type = type_
-            local_path = Path(tempdir, dataset_name)
-            local_path.write_text('')
+
             if type_ == 'PO':
                 self.root.ftp.mkdir(dataset)
             else:
-
-                self.open_file(local_path, dataset, new=True)
+                self.open_file(dataset)
             dpg.delete_item('new_file_dialog')
 
         # Close existing dialog
@@ -93,53 +170,38 @@ class Editor:
                 dpg.add_button(label='Create', callback=create_file)
                 dpg.add_button(label='Cancel', callback=lambda: dpg.delete_item('new_file_dialog'))
 
+        dpg.focus_item('new_file_dataset_input')
         # Center dialog
         vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
         dpg.set_item_pos('new_file_dialog', (vw/2 - w/2, vh/2 - h/2))
 
-    def save_file(self):
+    def save_open_file(self):
         tab = self.get_current_tab()
-        if not tab:
+        if not tab or not tab.dataset:
             return
+
         if tab.dirty:
-            tab.local_path.write_text(dpg.get_value('editor'), newline='')
-            if not self.root.ftp.upload(tab.local_path, tab.dataset_metadata):
+            text: str = dpg.get_value(tab.editor)
+            lines = []
+            for line in text.split('\n'):
+                lines.append(line.ljust(tab.dataset.record_length))
+            tab.dataset.local_path.write_text(''.join(lines), newline='')
+
+            if not self.root.ftp.upload(tab.dataset.local_path):
                 return
-            tab.dirty = False
-            dpg.configure_item(tab.id, label=tab.dataset_metadata.name)
+            tab.mark_clean()
+
             current_search = dpg.get_value('explorer_search_input')
-            if current_search and current_search in tab.dataset_metadata.name:
+            if current_search and current_search in tab.dataset.name:
                 self.root.explorer.refresh()
 
-    def open_file(self, local_path: Path, dataset: Dataset, new=False):
-        print(f'Opening {local_path}')
-        if not self.get_tab_by_name(local_path):
-            self.add_tab(local_path, dataset)
-
-        self.switch_to_tab(self.get_tab_by_name(local_path))
-        if new:
-            self.get_current_tab().mark_dirty()
-
-    def add_tab(self, local_path, dataset: Dataset):
-        id = dpg.add_tab(label=local_path.name, closable=True, parent='editor_tab_bar')
-        tab = Tab(local_path, id, dataset)
-        self.tabs.append(tab)
-        self.switch_to_tab(tab)
-
+    # Tabs
     def switch_to_tab(self, tab: Tab):
-        dpg.set_value('editor_tab_bar', tab.id)
-        if tab is self.empty_tab:
-            dpg.hide_item('editor')
-            return
-        content = open(tab.local_path).read()
-        lines = [line.rstrip() for line in content.split('\n')]
-        dpg.set_value('editor', '\n'.join(lines))
-        dpg.show_item(tab.id)
-        dpg.show_item('editor')
+        dpg.set_value('editor_tab_bar', tab.uuid)
 
     def cycle_tabs(self, direction: int):
         self.update_internal_state()
-        tabs = [tab.id for tab in self.tabs]
+        tabs = [tab.uuid for tab in self.tabs]
         tab = dpg.get_value('editor_tab_bar')
         index = tabs.index(tab) + direction
         index = index % len(tabs)
@@ -150,21 +212,27 @@ class Editor:
         tab = dpg.get_value('editor_tab_bar')
         return self.get_tab_by_id(tab)
 
-    def get_tab_by_name(self, path: Path):
-        matching_tabs = [tab for tab in self.tabs if tab.local_path == path]
+    def get_tab_by_job(self, job: Job) -> Tab:
+        matching_tabs = [tab for tab in self.tabs if tab.job and tab.job.id == job.id]
+        if len(matching_tabs) == 0:
+            return None
+        return matching_tabs.pop()
+
+    def get_tab_by_dataset(self, dataset: str) -> Tab:
+        matching_tabs = [tab for tab in self.tabs if tab.dataset and tab.dataset.name == dataset]
         if len(matching_tabs) == 0:
             return None
         return matching_tabs.pop()
 
     def get_tab_by_id(self, id: int):
-        matching_tabs = [tab for tab in self.tabs if tab.id == id]
+        matching_tabs = [tab for tab in self.tabs if tab.uuid == id]
         if len(matching_tabs) == 0:
             return None
         return matching_tabs.pop()
 
     def save_keybind(self):
         if dpg.is_key_down(dpg.mvKey_Control):
-            self.save_file()
+            self.save_open_file()
 
     def switch_tab_keybind(self):
         if dpg.is_key_down(dpg.mvKey_Control):
@@ -182,19 +250,22 @@ class Editor:
             self.delete_tab(tab)
 
     def delete_tab(self, tab: Tab):
-        dpg.delete_item(tab.id)
+        dpg.delete_item(tab.uuid)
         self.tabs.remove(tab)
-        if tab.local_path:
-            tab.local_path.unlink()
+
+    def close_tab_by_dataset(self, dataset: Dataset):
+        tab = self.get_tab_by_dataset(dataset.name)
+        if tab:
+            self.delete_tab(tab)
 
     def update_internal_state(self):
         try:
             children = dpg.get_item_children('editor_tab_bar')[1]
-            _tabs = [tab for tab in self.tabs if tab.id in children]
+            _tabs = [tab for tab in self.tabs if tab.uuid in children]
             for tab in _tabs:
-                if not dpg.is_item_visible(tab.id):
+                if not dpg.is_item_visible(tab.uuid):
                     self.delete_tab(tab)
-            _tabs.sort(key=lambda x: dpg.get_item_rect_min(x.id)[0])
+            _tabs.sort(key=lambda x: dpg.get_item_rect_min(x.uuid)[0])
             self.tabs = _tabs
         except Exception as e:
             print('Error updating internal state:', e)

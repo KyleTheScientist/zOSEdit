@@ -1,6 +1,9 @@
 import re
+import contextlib
 from dearpygui import dearpygui as dpg
-from zosedit.dataset import Dataset
+from zosedit.models import Dataset
+from traceback import format_exc
+from textwrap import indent
 
 
 class Explorer:
@@ -9,10 +12,29 @@ class Explorer:
         self.root = root
 
     def build(self):
-        with dpg.group(horizontal=True, show=False, tag='explorer_search_group'):
-            dpg.add_input_text(hint='Enter a dataset', tag='explorer_search_input',
-                               on_enter=True, callback=self.refresh, width=260, uppercase=True)
-            dpg.add_button(label=' O ', callback=self.refresh)
+
+        input_options = dict(on_enter=True, callback=self.refresh_datasets, uppercase=True)
+        with dpg.group(show=False, tag='explorer_search_group'):
+            with dpg.tab_bar(tag='explorer_tab_bar', callback=self.on_tab_changed):
+                # Datasets tab
+                with dpg.tab(label='Datasets', tag='explorer_datasets_tab'):
+                    with dpg.group(horizontal=True, tag='explorer_dataset_search_group'):
+                        dpg.add_input_text(hint='Search', tag='explorer_dataset_input', width=260, **input_options)
+                        dpg.add_button(label=' O ', callback=self.refresh_datasets)
+                    dpg.add_child_window(label='Results', tag='dataset_results')
+
+                # Jobs tab
+                input_options['callback'] = self.refresh_jobs
+                with dpg.tab(label='Jobs', tag='explorer_jobs_tab'):
+                    with dpg.group(tag='explorer_job_search_group', width=-1):
+                        dpg.add_input_text(hint='Name', tag='explorer_jobname_input', **input_options)
+                        dpg.add_input_text(hint='ID', tag='explorer_jobid_input', **input_options)
+                        dpg.add_input_text(hint='Owner', tag='explorer_jobowner_input', **input_options)
+                        dpg.add_button(label='Search', callback=self.refresh_jobs)
+                    dpg.add_child_window(label='Results', tag='job_results')
+
+    def on_tab_changed(self):
+        tab = dpg.get_value('explorer_tab_bar')
 
     def hide(self):
         dpg.hide_item('explorer_search_group')
@@ -22,12 +44,47 @@ class Explorer:
     def show(self, value=''):
         dpg.show_item('explorer_search_group')
         if value:
-            dpg.set_value('explorer_search_input', value)
-            self.refresh()
+            dpg.set_value('explorer_dataset_input', value)
+            self.refresh_datasets()
 
-    def refresh(self):
+    def refresh_jobs(self):
+        print('Refreshing jobs')
+        name = dpg.get_value('explorer_jobname_input')
+        id = dpg.get_value('explorer_jobid_input')
+        owner = dpg.get_value('explorer_jobowner_input')
+        if not name and not id and not owner:
+            return
+
+        # Clear existing results
+        with self.empty_results('job_results'):
+            # Search for jobs
+            status = dpg.add_text('Searching...')
+            try:
+                jobs = self.root.ftp.list_jobs(name, id, owner)
+            except Exception as e:
+                dpg.set_value(status, f'Error: {e}')
+                print('Error listing jobs')
+                print(indent(format_exc(), '    '))
+                dpg.configure_item(status, color=(255, 0, 0))
+                return
+            dpg.set_value(status, f'Found {len(jobs)} job(s)')
+
+            # List results
+            with dpg.table(header_row=True, policy=dpg.mvTable_SizingStretchProp):
+                dpg.add_table_column(label='ID')
+                dpg.add_table_column(label='Name')
+                dpg.add_table_column(label='Owner')
+                dpg.add_table_column(label='RC')
+                for job in jobs:
+                    with dpg.table_row():
+                        dpg.add_button(label=job.id, callback=self._open_job(job))
+                        dpg.add_text(job.name)
+                        dpg.add_text(job.owner)
+                        dpg.add_text(job.rc)
+
+    def refresh_datasets(self):
         # Get datasets
-        search = dpg.get_value('explorer_search_input')
+        search = dpg.get_value('explorer_dataset_input')
         if not search:
             return
         if not re.match(r"'[^']+'", search):
@@ -36,19 +93,13 @@ class Explorer:
             else:
                 search = f"'{search}'"
 
-        # Clear existing results
-        if dpg.does_item_exist('results'):
-            dpg.delete_item('results')
-
-        # List results
-        with dpg.child_window(label='Results', tag='results', parent='win_explorer'):
-
+        with self.empty_results('dataset_results'): # Clears existing results
             # Search for datasets
-            dpg.add_text('Searching...', tag='search_status')
+            status = dpg.add_text('Searching...')
             datasets = [d for d in self.root.ftp.list_datasets(search) if d.type is not None]
-            dpg.set_value('search_status', f'Found {len(datasets)} dataset(s)')
+            dpg.set_value(status, f'Found {len(datasets)} dataset(s)')
 
-            # Create buttons for each dataset
+            # List results
             with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchProp):
                 dpg.add_table_column(label='Name')
                 for dataset in datasets:
@@ -56,20 +107,20 @@ class Explorer:
                         with dpg.table_cell():
                             self.entry(dataset, leaf=not dataset.is_partitioned())
 
-    def entry(self, dataset: Dataset, member: str = None, leaf=False, **kwargs):
-        # Create the button/dropdown for the dataset
-        header = dpg.add_collapsing_header(label=member or dataset.name, leaf=leaf, **kwargs)
 
+    def entry(self, dataset: Dataset, leaf=False, **kwargs):
+        # Create the button/dropdown for the dataset
+        header = dpg.add_collapsing_header(label=dataset.member or dataset.name, leaf=leaf, **kwargs)
 
         # Decide left-click functionality
-        callback = self._open_file(dataset, member) if leaf else self._populate_pds(dataset, header)
+        callback = self._open_file(dataset) if leaf else self._populate_pds(dataset, header)
 
         # Create context menu
         dpg.popup
         with dpg.window(show=False, autosize=True, popup=True) as context_menu:
             if leaf:
-                dpg.add_menu_item(label='Open', callback=self._open_file(dataset, member))
-            dpg.add_menu_item(label='Delete', callback=self.try_delete_file, user_data=(dataset, member))
+                dpg.add_menu_item(label='Open', callback=self._open_file(dataset))
+            dpg.add_menu_item(label='Delete', callback=self.try_delete_file, user_data=dataset)
 
         # Add functionality to the button/dropdown
         with dpg.item_handler_registry() as reg:
@@ -87,31 +138,43 @@ class Explorer:
             return
 
         for member in members:
-            self.entry(dataset=dataset, member=member, leaf=True, parent=id, indent=10)
+            self.entry(dataset=dataset(member), leaf=True, parent=id, indent=10)
 
 
     def _populate_pds(self, dataset: Dataset, parent: int):
         return lambda: self.populate_pds(dataset, parent)
 
-    def _open_file(self, dataset: Dataset, member: str):
+    def _open_file(self, dataset: Dataset):
         def callback():
-            filename = self.root.ftp.download_file(dataset, member)
-            self.root.editor.open_file(filename, dataset)
+            self.root.editor.open_file(dataset)
         return callback
 
-    def try_delete_file(self, sender, data, user_data):
-        dataset, member = user_data
+    def _open_job(self, job):
+        def callback():
+            self.root.editor.open_job(job)
+        return callback
+
+    def try_delete_file(self, sender, data, dataset):
         w, h = 300, 150
         with dpg.window(modal=True, tag='delete_file_dialog', autosize=True, no_title_bar=True):
             dpg.add_text('Confirm deletion of:', color=(255, 80, 80))
-            name = f'{dataset.name}({member})' if member else dataset.name
-            dpg.add_text(name, bullet=True)
+            dpg.add_text(dataset.name, bullet=True)
             with dpg.group(horizontal=True):
                 bw = 100
-                dpg.add_button(label='Delete', callback=self.delete_file, user_data=user_data, width=bw)
+                dpg.add_button(label='Delete', callback=self.delete_file, user_data=dataset, width=bw)
                 dpg.add_button(label='Cancel', callback=lambda: dpg.delete_item('delete_file_dialog'), width=bw)
 
-    def delete_file(self, sender, data, user_data):
+    def delete_file(self, sender, data, dataset):
         dpg.delete_item('delete_file_dialog')
-        self.root.ftp.delete(*user_data)
-        self.refresh()
+        self.root.ftp.delete(dataset)
+        self.root.editor.close_tab_by_dataset(dataset)
+        self.refresh_datasets()
+
+    @contextlib.contextmanager
+    def empty_results(self, item):
+        for child in dpg.get_item_children(item)[1]:
+            dpg.delete_item(child)
+
+        dpg.push_container_stack(item)
+        yield
+        dpg.pop_container_stack()
