@@ -1,3 +1,4 @@
+from typing import Literal
 from ftplib import FTP
 from .models import Dataset, Job, Spool
 from pathlib import Path
@@ -37,6 +38,7 @@ class zFTP:
         files = []
         try:
             self.check_alive()
+            self.set_ftp_vars('SEQ')
             self.ftp.dir(search_string, files.append)
         except Exception as e:
             if '550' in str(e):
@@ -55,6 +57,7 @@ class zFTP:
             members.append(line.split()[0])
         try:
             self.check_alive()
+            self.set_ftp_vars('SEQ')
             self.ftp.dir(f"'{dataset.name}(*)'", append)
         except Exception as e:
             print('Error getting members for', dataset.name)
@@ -71,6 +74,7 @@ class zFTP:
 
         try:
             self.check_alive()
+            self.set_ftp_vars('SEQ')
             self.ftp.retrlines(f"RETR '{name}'", write)
             content = '\n'.join(raw_data)
         except Exception as e:
@@ -87,6 +91,7 @@ class zFTP:
     def mkdir(self, dataset: Dataset):
         try:
             self.check_alive()
+            self.set_ftp_vars('SEQ')
             self.ftp.mkd(f"'{dataset.name}'")
         except Exception as e:
             print('Error creating PDS', dataset)
@@ -101,6 +106,7 @@ class zFTP:
                 tmp.write(data.encode('cp500'))
                 tmp.seek(0)
                 self.check_alive()
+                self.set_ftp_vars('SEQ')
                 self.ftp.storbinary(f"STOR '{local_path.name}'", tmp)
         except Exception as e:
             print('Error uploading', local_path)
@@ -112,6 +118,7 @@ class zFTP:
     def delete(self, dataset: Dataset):
         try:
             self.check_alive()
+            self.set_ftp_vars('SEQ')
             self.ftp.delete(f"'{dataset.name}'")
             print('Deleted', dataset.name)
         except Exception as e:
@@ -129,9 +136,8 @@ class zFTP:
         raw_data: list[str] = []
         try:
             self.check_alive()
-            self.ftp.sendcmd(f'SITE FILETYPE=JES JESJOBNAME={name} JESOWNER={owner}')
+            self.set_ftp_vars(f'JES', JESJOBNAME=name, JESOWNER=owner)
             self.ftp.dir(id, raw_data.append)
-            self.ftp.sendcmd(f'SITE RESET')
         except Exception as e:
             if '550' in str(e):
                 return []
@@ -143,6 +149,7 @@ class zFTP:
         # If only a single job is returned it provides a different format
         if '--------' in raw_data:
             raw_data = ['', raw_data[1] + '  ' + raw_data[-1]]
+
         return [Job(job_str) for job_str in raw_data[1:]]
 
     def download_spools(self, job: Job):
@@ -150,7 +157,7 @@ class zFTP:
         spools = self.list_spools(job.id)
 
         self.check_alive()
-        self.ftp.sendcmd(f'SITE FILETYPE=JES')
+        self.set_ftp_vars('JES')
         exceptions = []
         result = []
         for spool in spools:
@@ -167,7 +174,6 @@ class zFTP:
                 print(indent(format_exc(), '    '))
                 exceptions.append((spool_name, e))
                 continue
-        self.ftp.sendcmd(f'SITE RESET')
 
         errors = []
         for spool, exception in exceptions:
@@ -183,9 +189,8 @@ class zFTP:
         raw_data: list[str] = []
         try:
             self.check_alive()
-            self.ftp.sendcmd(f'SITE FILETYPE=JES')
+            self.set_ftp_vars('JES')
             self.ftp.dir(job_id, raw_data.append)
-            self.ftp.sendcmd(f'SITE RESET')
         except Exception as e:
             print('Error listing spool outputs')
             print(indent(format_exc(), '    '))
@@ -193,6 +198,11 @@ class zFTP:
             return []
 
         return [Spool(spool_str) for spool_str in raw_data[4:-1]]
+
+    def set_ftp_vars(self, mode=Literal['SEQ', 'JES', 'SQL'], **kwargs):
+        self.check_alive()
+        args = ' '.join(f"{key}={value}" for key, value in kwargs.items())
+        self.ftp.sendcmd(f'SITE RESET FILETYPE={mode} {args}')
 
     def show_error(self, message):
         if dpg.does_item_exist('error'):

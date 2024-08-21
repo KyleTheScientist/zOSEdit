@@ -1,11 +1,13 @@
 '''
 To build the package, run:
-    rm dist/*; pip install --upgrade build && python -m build
+    pip install --upgrade build;
+    rm dist/*; python -m build
 
 The built package will be in the dist/ directory
 
 To upload the package to PyPI, run:
-    pip install --upgrade twine && twine upload dist/*
+    pip install --upgrade twine;
+    twine upload dist/*
 '''
 
 from setuptools import setup, find_packages
@@ -15,7 +17,7 @@ readme = Path(__file__).parent / 'README.md'
 
 setup(
     name='zosedit',
-    version='0.0.4',
+    version='0.0.6',
     description='FTP-based MVS Dataset Editor',
     long_description=readme.read_text(),
     long_description_content_type='text/markdown',

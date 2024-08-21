@@ -99,7 +99,7 @@ class Spool:
         self.string = string
         data = string.split()
         if len(data) == len(self.cols) - 1:
-            data.insert(3, 'N/A')
+            data.insert(3, '')
 
         for col, value in zip(self.cols, data):
             setattr(self, col, value)
