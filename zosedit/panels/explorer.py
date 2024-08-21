@@ -14,7 +14,7 @@ class Explorer:
     def build(self):
 
         input_options = dict(on_enter=True, callback=self.refresh_datasets, uppercase=True)
-        with dpg.group(show=False, tag='explorer_search_group'):
+        with dpg.group(tag='explorer_search_group'):
             with dpg.tab_bar(tag='explorer_tab_bar', callback=self.on_tab_changed):
                 # Datasets tab
                 with dpg.tab(label='Datasets', tag='explorer_datasets_tab'):
@@ -34,18 +34,17 @@ class Explorer:
                     dpg.add_child_window(label='Results', tag='job_results')
 
     def on_tab_changed(self):
-        tab = dpg.get_value('explorer_tab_bar')
+        pass
 
-    def hide(self):
-        dpg.hide_item('explorer_search_group')
-        if dpg.does_item_exist('results'):
-            dpg.delete_item('results')
-
-    def show(self, value=''):
-        dpg.show_item('explorer_search_group')
-        if value:
-            dpg.set_value('explorer_dataset_input', value)
-            self.refresh_datasets()
+    def reset(self):
+        with self.empty_results('dataset_results'):
+            with self.empty_results('job_results'):
+                pass
+        dpg.set_value('explorer_tab_bar', 'explorer_datasets_tab')
+        dpg.set_value('explorer_jobname_input', '')
+        dpg.set_value('explorer_jobid_input', '')
+        dpg.set_value('explorer_jobowner_input', '')
+        dpg.set_value('explorer_dataset_input', '')
 
     def refresh_jobs(self):
         print('Refreshing jobs')
@@ -82,9 +81,11 @@ class Explorer:
                         dpg.add_text(job.owner)
                         dpg.add_text(job.rc)
 
-    def refresh_datasets(self):
+    def refresh_datasets(self, value=None):
+        if value:
+            dpg.set_value('explorer_dataset_input', value)
         # Get datasets
-        search = dpg.get_value('explorer_dataset_input')
+        search = value or dpg.get_value('explorer_dataset_input')
         if not search:
             return
         if not re.match(r"'[^']+'", search):

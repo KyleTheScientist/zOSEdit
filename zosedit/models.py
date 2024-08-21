@@ -88,7 +88,7 @@ class Spool:
 
     cols = 'id', 'stepname', 'procstep', 'c', 'ddname', 'byte_count'
 
-    def __init__(self, string):
+    def __init__(self, string: str):
         self.id: str = None
         self.stepname: str = None
         self.procstep: str = None
@@ -98,6 +98,9 @@ class Spool:
 
         self.string = string
         data = string.split()
+        if len(data) == len(self.cols) - 1:
+            data.insert(3, 'N/A')
+
         for col, value in zip(self.cols, data):
             setattr(self, col, value)
 

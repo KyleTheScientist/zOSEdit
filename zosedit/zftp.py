@@ -143,7 +143,6 @@ class zFTP:
         # If only a single job is returned it provides a different format
         if '--------' in raw_data:
             raw_data = ['', raw_data[1] + '  ' + raw_data[-1]]
-        print('Raw data:\n', indent('\n'.join(raw_data), '    '))
         return [Job(job_str) for job_str in raw_data[1:]]
 
     def download_spools(self, job: Job):

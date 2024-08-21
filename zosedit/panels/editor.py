@@ -12,6 +12,7 @@ class Tab:
         self.job = job
         self.dirty = False
         self.uuid = None
+        self.label = None
 
         if dataset:
             self.build_dataset_tab()
@@ -26,6 +27,7 @@ class Tab:
                 dpg.delete_item(child)
         else:
             self.uuid = dpg.add_tab(label=self.dataset.name, closable=True, parent='editor_tab_bar')
+            self.label = self.dataset.name
 
         dpg.set_value('editor_tab_bar', self.uuid)
 
@@ -46,16 +48,20 @@ class Tab:
             width=-1,
             height=-1,
             callback=self.mark_dirty,
+            tab_input=True,
             user_data=self)
         dpg.set_value(self.editor, '\n'.join(lines))
 
     def build_job_tab(self):
         label = f'{self.job.name} ({self.job.id})'
+
         if self.uuid:
             for child in dpg.get_item_children(self.uuid)[1]:
                 dpg.delete_item(child)
         else:
             self.uuid = dpg.add_tab(label=label, closable=True, parent='editor_tab_bar')
+            self.label = label
+
         dpg.set_value('editor_tab_bar', self.uuid)
         dpg.add_text(self.job.string, parent=self.uuid)
         status = dpg.add_text('Downloading spool output...', parent=self.uuid)
@@ -65,7 +71,11 @@ class Tab:
 
         for spool in self.job.spools:
             with dpg.collapsing_header(label=spool.ddname, parent=self.uuid, user_data=spool):
-                dpg.add_text(spool.local_path.read_text())
+                dpg.add_input_text(multiline=True,
+                                   width=-1,
+                                   height=-1,
+                                   default_value=spool.local_path.read_text(),
+                                   readonly=True)
 
     def mark_dirty(self):
         dpg.configure_item(self.uuid, label=self.dataset.name + '*')
@@ -77,7 +87,7 @@ class Tab:
         self.dataset.new = False
 
     def __repr__(self):
-        return f"Tab({self.local_path}, {self.uuid}, {dpg.get_item_rect_min(self.uuid)})"
+        return f"Tab({self.label} - {self.uuid})"
 
 
 class Editor:
@@ -97,12 +107,10 @@ class Editor:
             dpg.add_key_press_handler(dpg.mvKey_W, callback=self.close_tab_keybind)
             dpg.add_key_press_handler(dpg.mvKey_Tab, callback=self.switch_tab_keybind)
 
-    def hide(self):
-        dpg.hide_item('editor')
-        for tab in self.tabs:
-            if tab is not self.empty_tab:
-                dpg.hide_item(tab.uuid)
-
+    def reset(self):
+        tabs = [tab for tab in self.tabs if tab is not self.empty_tab]
+        for tab in tabs:
+            self.delete_tab(tab)
         self.tabs = [self.empty_tab]
 
     def on_tab_changed(self):
@@ -185,7 +193,7 @@ class Editor:
             lines = []
             for line in text.split('\n'):
                 lines.append(line.ljust(tab.dataset.record_length))
-            tab.dataset.local_path.write_text(''.join(lines), newline='')
+            tab.dataset.local_path.write_text(''.join(lines))
 
             if not self.root.ftp.upload(tab.dataset.local_path):
                 return

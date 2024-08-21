@@ -1,6 +1,6 @@
 # z/OS Edit
 
-This GUI application provides a way to edit datasets on z/OS. It is a simple text editor that allows you to open, edit, and save files on z/OS.
+This GUI application provides a way to browse/edit datasets on z/OS as well as read job output from JES2.
 
 ## Installation
 
@@ -8,5 +8,5 @@ This GUI application provides a way to edit datasets on z/OS. It is a simple tex
 
 ## Usage
 
-To run the application, simply type `zosedit` in your terminal.
+Once installed with Pip, to run the application, simply type `zosedit` in your terminal.
 

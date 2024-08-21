@@ -23,12 +23,12 @@ class Root:
 
         with dpg.window(label="Main") as main:
             with dpg.menu_bar():
-                with dpg.menu(label="File"):
+                with dpg.menu(label="File", tag='file_menu'):
                     dpg.add_menu_item(label="New", shortcut="Ctrl+N", callback=self.editor.new_file)
                     dpg.add_menu_item(label="Save", shortcut="Ctrl+S", callback=self.editor.save_open_file)
                     if platform.system() == 'Windows':
                         dpg.add_menu_item(label="Open Data Directory", callback=self.open_data_directory)
-                with dpg.menu(label="Session"):
+                with dpg.menu(label="Session", tag='session_menu'):
                     dpg.add_menu_item(label="Login", callback=self.login)
                     dpg.add_menu_item(label="Logout", callback=self.logout)
 
@@ -52,8 +52,9 @@ class Root:
     def logout(self):
         self.ftp.quit()
         self.ftp = None
-        self.editor.hide()
-        self.explorer.hide()
+        self.explorer.reset()
+        self.editor.reset()
+        self.login()
 
     def login(self):
         def _login():
@@ -70,8 +71,10 @@ class Root:
             except Exception as e:
                 dpg.set_value('login_status', f'Error connecting: {e}')
                 return
-            self.explorer.show(value=username)
+
             dpg.delete_item('login_dialog')
+
+            self.explorer.refresh_datasets(value=username)
 
         if dpg.does_item_exist('login_dialog'):
             dpg.delete_item('login_dialog')
