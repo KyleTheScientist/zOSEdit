@@ -74,7 +74,8 @@ class Root:
 
             dpg.delete_item('login_dialog')
 
-            self.explorer.refresh_datasets(value=username)
+            dpg.set_value('explorer_dataset_input', username)
+            self.explorer.refresh_datasets()
 
         if dpg.does_item_exist('login_dialog'):
             dpg.delete_item('login_dialog')

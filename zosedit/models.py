@@ -21,19 +21,24 @@ class Dataset:
         self.name: str = None
         self._populated = False
 
-        data = string.split()
-        if len(data) != len(self.cols):
-            self.name = data[-1].replace("'", "")
-            return
+        try:
+            data = string.split()
+            if len(data) != len(self.cols):
+                self.name = data[-1].replace("'", "")
+                return
 
-        for col, value in zip(self.cols, data):
-            setattr(self, col, value)
+            for col, value in zip(self.cols, data):
+                setattr(self, col, value)
 
-        self.name = self.name.replace("'", "")
-        if self.member:
-            self.name = f"{self.name}({self.member})"
+            self.name = self.name.replace("'", "")
+            if self.member:
+                self.name = f"{self.name}({self.member})"
 
-        self.record_length = int(self.record_length)
+            self.record_length = int(self.record_length)
+        except Exception as e:
+            print('Error parsing dataset:', e)
+            print(string)
+
         # self.used = int(self.used)
         # self.ext = int(self.ext)
         # self.block_size = int(self.block_size)
@@ -56,6 +61,8 @@ class Job:
     cols = 'name', 'id', 'owner', 'status', 'class', 'rc', 'spool_count'
 
     def __init__(self, string):
+        self.string = string
+
         self.name: str = None
         self.id: str = None
         self.owner: str = None
@@ -63,21 +70,25 @@ class Job:
         self.class_: str = None
         self.rc: int = None
         self.spool_count: int = None
+        try:
+            weirdness = re.search(r'\(([^)]*)\)', string)
+            if weirdness:
+                group = weirdness.group()
+                string = string.replace(group, group.replace(' ', '_'))
 
-        string = re.sub(r'\(([^\s]*?)\s([^\s].*?)\)', r'\1_\2', string)
-        self.string = string
-        data = string.split()
-        for col, value in zip(self.cols, data):
-            setattr(self, col, value)
+            for col, value in zip(self.cols, string.split()):
+                setattr(self, col, value)
 
-        if self.rc is None:
-            self.rc = '?'
-        elif 'error' in self.rc:
-            self.rc = 'JCLERR'
-        else:
-            self.rc = int(self.rc[3:])
-        if self.spool_count is not None:
-            self.spool_count = int(self.spool_count.split()[0])
+            if self.rc and '=' in self.rc:
+                self.rc = int(self.rc.split('=')[1])
+            if self.spool_count is not None:
+                self.spool_count = int(self.spool_count.split()[0])
+        except Exception as e:
+            print('Error parsing job:', e)
+            print(string)
+
+    def read(self, *args, **kwargs):
+        return None
 
     def __repr__(self):
         attrs = ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
@@ -89,20 +100,28 @@ class Spool:
     cols = 'id', 'stepname', 'procstep', 'c', 'ddname', 'byte_count'
 
     def __init__(self, string: str):
+        self.string = string
+
         self.id: str = None
         self.stepname: str = None
         self.procstep: str = None
         self.c: str = None
         self.ddname: str = None
         self.byte_count: int = None
+        try:
+            data = string.split()
+            if len(data) == len(self.cols) - 1:
+                data.insert(3, '')
 
-        self.string = string
-        data = string.split()
-        if len(data) == len(self.cols) - 1:
-            data.insert(3, '')
+            for col, value in zip(self.cols, data):
+                setattr(self, col, value)
 
-        for col, value in zip(self.cols, data):
-            setattr(self, col, value)
+            if self.byte_count is not None:
+                self.byte_count = float(self.byte_count)
+        except Exception as e:
+            print('Error parsing spool:', e)
+            print(string)
 
-        if self.byte_count is not None:
-            self.byte_count = int(self.byte_count)
+    def __repr__(self):
+        attrs = ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
+        return f"Spool({attrs})"

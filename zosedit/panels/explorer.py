@@ -81,11 +81,9 @@ class Explorer:
                         dpg.add_text(job.owner)
                         dpg.add_text(job.rc)
 
-    def refresh_datasets(self, value=None):
-        if value:
-            dpg.set_value('explorer_dataset_input', value)
+    def refresh_datasets(self):
         # Get datasets
-        search = value or dpg.get_value('explorer_dataset_input')
+        search = dpg.get_value('explorer_dataset_input')
         if not search:
             return
         if not re.match(r"'[^']+'", search):
@@ -121,6 +119,7 @@ class Explorer:
         with dpg.window(show=False, autosize=True, popup=True) as context_menu:
             if leaf:
                 dpg.add_menu_item(label='Open', callback=self._open_file(dataset))
+                dpg.add_menu_item(label='Submit', callback=self._submit_file(dataset))
             dpg.add_menu_item(label='Delete', callback=self.try_delete_file, user_data=dataset)
 
         # Add functionality to the button/dropdown
@@ -148,6 +147,11 @@ class Explorer:
     def _open_file(self, dataset: Dataset):
         def callback():
             self.root.editor.open_file(dataset)
+        return callback
+
+    def _submit_file(self, dataset: Dataset):
+        def callback():
+            self.root.ftp.submit_job(dataset)
         return callback
 
     def _open_job(self, job):

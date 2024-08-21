@@ -128,6 +128,21 @@ class zFTP:
             return False
         return True
 
+    def submit_job(self, dataset: Dataset):
+        try:
+            self.check_alive()
+            path: Path = self.download_file(dataset.name)
+            self.ftp.set_debuglevel(2)
+            self.set_ftp_vars('JES')
+            response = self.ftp.storlines(f"STOR '{dataset.name}'", path.open('rb'))
+            self.show_response(response)
+        except Exception as e:
+            print('Error submitting job')
+            print(indent(format_exc(), '    '))
+            self.show_error(f'Error submitting job:\n{e}')
+            return False
+        return True
+
     def list_jobs(self, name=None, id=None, owner=None):
         name = name or '*'
         owner = owner or '*'
@@ -170,9 +185,9 @@ class zFTP:
                 spool.local_path = path
                 result.append(spool)
             except Exception as e:
-                print(f'Error downloading spool {spool_name}')
+                print(f'Error downloading spool:\n\t{spool}')
                 print(indent(format_exc(), '    '))
-                exceptions.append((spool_name, e))
+                exceptions.append((spool, e))
                 continue
 
         errors = []
@@ -202,18 +217,33 @@ class zFTP:
     def set_ftp_vars(self, mode=Literal['SEQ', 'JES', 'SQL'], **kwargs):
         self.check_alive()
         args = ' '.join(f"{key}={value}" for key, value in kwargs.items())
-        self.ftp.sendcmd(f'SITE RESET FILETYPE={mode} {args}')
+        self.ftp.sendcmd(f'SITE RESET')
+        self.ftp.sendcmd(f'SITE FILETYPE={mode} {args}')
 
     def show_error(self, message):
         if dpg.does_item_exist('error'):
             dpg.delete_item('error')
-        with dpg.window(label='FTP Error', tag='error', autosize=True):
+        with dpg.window(label='FTP Error', tag='error', autosize=True, modal=True):
             dpg.add_text(message, color=(255, 0, 0))
 
         # center the error window
-        w, h = dpg.get_item_rect_size('error')
+        w, h = dpg.get_text_size(message)
         try:
-            vw, vh = dpg.get_viewport_size()
+            vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
         except:
             vw, vh = w, h
         dpg.set_item_pos('error', (vw/2 - w/2, vh/2 - h/2))
+
+    def show_response(self, response):
+        if dpg.does_item_exist('response'):
+            dpg.delete_item('response')
+        with dpg.window(label='FTP Response', tag='response', autosize=True, modal=True):
+            dpg.add_text(response)
+
+        # center the response window
+        w, h = dpg.get_text_size(response)
+        try:
+            vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
+        except:
+            vw, vh = w, h
+        dpg.set_item_pos('response', (vw/2 - w/2, vh/2 - h/2))
