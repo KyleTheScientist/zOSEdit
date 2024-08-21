@@ -45,7 +45,8 @@ class Root:
         dpg.set_primary_window(main, True)
         dpg.setup_dearpygui()
         dpg.show_viewport()
-        dpg.start_dearpygui()
+        while dpg.is_dearpygui_running():
+            dpg.render_dearpygui_frame()
         dpg.destroy_context()
 
     def logout(self):
@@ -69,14 +70,14 @@ class Root:
             except Exception as e:
                 dpg.set_value('login_status', f'Error connecting: {e}')
                 return
-            dpg.show_item('explorer_search_group')
-            self.explorer.refresh()
+            self.explorer.show(value=username)
             dpg.delete_item('login_dialog')
 
         if dpg.does_item_exist('login_dialog'):
             dpg.delete_item('login_dialog')
         w, h = 300, 150
-        with dpg.window(tag='login_dialog', label='Login', width=w, height=h):
+        # Create new dialog
+        with dpg.window(tag='login_dialog', label='Login', width=w, height=h, modal=True, popup=True):
             kwargs = {'on_enter': True, 'callback': _login, 'width': -1}
             dpg.add_input_text(hint='Host', tag='settings_host_input', default_value='QAZOS205', **kwargs)
             dpg.add_input_text(hint='Username', tag='settings_username_input', uppercase=True, **kwargs)
@@ -86,9 +87,12 @@ class Root:
                 dpg.add_button(label='Login', callback=_login, width=bw)
                 dpg.add_button(label='Cancel', callback=lambda: dpg.delete_item('login_dialog'), width=bw -1)
             dpg.add_text('', tag='login_status')
+
+        # Center dialog
         vw = dpg.get_viewport_width()
         vh = dpg.get_viewport_height()
         dpg.set_item_pos('login_dialog', (vw/2-w/2, vh/2-h/2))
+        dpg.focus_item('settings_username_input')
 
     def open_data_directory(self):
         startfile(tempdir)

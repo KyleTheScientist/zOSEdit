@@ -6,18 +6,18 @@ from pathlib import Path
 
 class Tab:
 
-    def __init__(self, path: Path, id: int, dataset: Dataset):
+    def __init__(self, path: Path, id: int, dataset_metadata: Dataset):
         self.local_path = path
         self.id = id
-        self.dataset = dataset
+        self.dataset_metadata = dataset_metadata
         self.dirty = False
 
     def mark_dirty(self):
-        dpg.configure_item(self.id, label=self.dataset.name + '*')
+        dpg.configure_item(self.id, label=self.dataset_metadata.name + '*')
         self.dirty = True
 
     def __repr__(self):
-        return f"Tab({self.local_path}, {self.id})"
+        return f"Tab({self.local_path}, {self.id}, {dpg.get_item_rect_min(self.id)})"
 
 
 class Editor:
@@ -31,13 +31,13 @@ class Editor:
             id = dpg.add_tab(label='...', closable=False)
             self.empty_tab = Tab(None, id, None)
             self.tabs.append(self.empty_tab)
-
         dpg.add_input_text(tag="editor", parent='win_editor', show=False,
                                multiline=True, width=-1, height=-1, callback=self.on_editor_changed)
 
         with dpg.handler_registry():
             dpg.add_key_press_handler(dpg.mvKey_N, callback=self.new_file_keybind)
             dpg.add_key_press_handler(dpg.mvKey_S, callback=self.save_keybind)
+            dpg.add_key_press_handler(dpg.mvKey_W, callback=self.close_tab_keybind)
             dpg.add_key_press_handler(dpg.mvKey_Tab, callback=self.switch_tab_keybind)
 
     def hide(self):
@@ -52,9 +52,11 @@ class Editor:
         self.get_current_tab().mark_dirty()
 
     def on_tab_changed(self):
+        self.update_internal_state()
         tab = dpg.get_value('editor_tab_bar')
         tab = self.get_tab_by_id(tab)
-        self.switch_to_tab(tab)
+        if tab:
+            self.switch_to_tab(tab)
 
     def new_file(self):
         # Callback for creating a new file
@@ -101,12 +103,12 @@ class Editor:
             return
         if tab.dirty:
             tab.local_path.write_text(dpg.get_value('editor'), newline='')
-            if not self.root.ftp.upload(tab.local_path, tab.dataset):
+            if not self.root.ftp.upload(tab.local_path, tab.dataset_metadata):
                 return
             tab.dirty = False
-            dpg.configure_item(tab.id, label=tab.dataset.name)
+            dpg.configure_item(tab.id, label=tab.dataset_metadata.name)
             current_search = dpg.get_value('explorer_search_input')
-            if current_search and current_search in tab.dataset.name:
+            if current_search and current_search in tab.dataset_metadata.name:
                 self.root.explorer.refresh()
 
     def open_file(self, local_path: Path, dataset: Dataset, new=False):
@@ -136,7 +138,8 @@ class Editor:
         dpg.show_item('editor')
 
     def cycle_tabs(self, direction: int):
-        tabs = dpg.get_item_children('editor_tab_bar')[1]
+        self.update_internal_state()
+        tabs = [tab.id for tab in self.tabs]
         tab = dpg.get_value('editor_tab_bar')
         index = tabs.index(tab) + direction
         index = index % len(tabs)
@@ -170,3 +173,31 @@ class Editor:
     def new_file_keybind(self):
         if dpg.is_key_down(dpg.mvKey_Control):
             self.new_file()
+
+    def close_tab_keybind(self):
+        if dpg.is_key_down(dpg.mvKey_Control):
+            tab = self.get_current_tab()
+            if tab is self.empty_tab:
+                return
+            self.delete_tab(tab)
+
+    def delete_tab(self, tab: Tab):
+        dpg.delete_item(tab.id)
+        self.tabs.remove(tab)
+        if tab.local_path:
+            tab.local_path.unlink()
+
+    def update_internal_state(self):
+        try:
+            children = dpg.get_item_children('editor_tab_bar')[1]
+            _tabs = [tab for tab in self.tabs if tab.id in children]
+            for tab in _tabs:
+                if not dpg.is_item_visible(tab.id):
+                    self.delete_tab(tab)
+            _tabs.sort(key=lambda x: dpg.get_item_rect_min(x.id)[0])
+            self.tabs = _tabs
+        except Exception as e:
+            print('Error updating internal state:', e)
+
+
+
