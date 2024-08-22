@@ -46,6 +46,13 @@ class Explorer:
         dpg.set_value('explorer_jobowner_input', '')
         dpg.set_value('explorer_dataset_input', '')
 
+    def search_for_job_id(self, id):
+        dpg.set_value('explorer_tab_bar', 'explorer_jobs_tab')
+        dpg.set_value('explorer_jobname_input', '')
+        dpg.set_value('explorer_jobid_input', id)
+        dpg.set_value('explorer_jobowner_input', '')
+        self.refresh_jobs()
+
     def refresh_jobs(self):
         print('Refreshing jobs')
         name = dpg.get_value('explorer_jobname_input')
@@ -76,10 +83,10 @@ class Explorer:
                 dpg.add_table_column(label='RC')
                 for job in jobs:
                     with dpg.table_row():
-                        dpg.add_button(label=job.id, callback=self._open_job(job))
-                        dpg.add_text(job.name)
-                        dpg.add_text(job.owner)
-                        dpg.add_text(job.rc)
+                        dpg.add_selectable(span_columns=True, label=job.id, callback=self._open_job(job))
+                        dpg.add_selectable(span_columns=True, label=job.name, callback=self._open_job(job))
+                        dpg.add_selectable(span_columns=True, label=job.owner, callback=self._open_job(job))
+                        dpg.add_selectable(span_columns=True, label=job.rc, callback=self._open_job(job))
 
     def refresh_datasets(self):
         # Get datasets
@@ -120,6 +127,9 @@ class Explorer:
             if leaf:
                 dpg.add_menu_item(label='Open', callback=self._open_file(dataset))
                 dpg.add_menu_item(label='Submit', callback=self._submit_file(dataset))
+            else:
+                name = dataset.name + '()'
+                dpg.add_menu_item(label='Create member', callback=self._new_member(dataset))
             dpg.add_menu_item(label='Delete', callback=self.try_delete_file, user_data=dataset)
 
         # Add functionality to the button/dropdown
@@ -143,6 +153,11 @@ class Explorer:
 
     def _populate_pds(self, dataset: Dataset, parent: int):
         return lambda: self.populate_pds(dataset, parent)
+
+    def _new_member(self, dataset: Dataset):
+        def callback():
+            self.root.editor.new_file(dataset.name + '()')
+        return callback
 
     def _open_file(self, dataset: Dataset):
         def callback():

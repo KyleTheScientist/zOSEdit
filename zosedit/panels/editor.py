@@ -4,6 +4,7 @@ from zosedit.constants import tempdir
 from zosedit.zftp import zFTP
 from pathlib import Path
 
+
 class Tab:
 
     def __init__(self, *, ftp: zFTP = None, dataset: Dataset = None, job: Job = None):
@@ -29,6 +30,7 @@ class Tab:
             self.uuid = dpg.add_tab(label=self.dataset.name, closable=True, parent='editor_tab_bar')
             self.label = self.dataset.name
 
+        dpg.bind_item_theme(self.uuid, 'dataset_tab_theme')
         dpg.set_value('editor_tab_bar', self.uuid)
 
         if self.dataset.new:
@@ -39,21 +41,21 @@ class Tab:
             self.dataset.local_path = local_path
             dpg.delete_item(status)
 
-        content = self.dataset.local_path.read_text()
+        content = self.dataset.local_path.read_text(errors='replace')
         lines = [line.rstrip() for line in content.split('\n')]
-
+        text = '\n'.join(lines)
         self.editor = dpg.add_input_text(
             parent=self.uuid,
+            default_value=text,
             multiline=True,
             width=-1,
             height=-1,
             callback=self.mark_dirty,
             tab_input=True,
             user_data=self)
-        dpg.set_value(self.editor, '\n'.join(lines))
 
     def build_job_tab(self):
-        label = f'{self.job.name} ({self.job.id})'
+        label = f'{self.job.id} ({self.job.name})'
 
         if self.uuid:
             for child in dpg.get_item_children(self.uuid)[1]:
@@ -62,20 +64,24 @@ class Tab:
             self.uuid = dpg.add_tab(label=label, closable=True, parent='editor_tab_bar')
             self.label = label
 
+        dpg.bind_item_theme(self.uuid, 'job_tab_theme')
+
         dpg.set_value('editor_tab_bar', self.uuid)
         dpg.add_text(self.job.string, parent=self.uuid)
-        status = dpg.add_text('Downloading spool output...', parent=self.uuid)
-        spools = self.ftp.download_spools(self.job)
-        dpg.delete_item(status)
-        self.job.spools = spools
+        status = dpg.add_text('Downloading spool...', parent=self.uuid)
 
-        for spool in self.job.spools:
-            with dpg.collapsing_header(label=spool.ddname, parent=self.uuid, user_data=spool):
+        for spool in self.ftp.download_spools(self.job):
+            with dpg.collapsing_header(before=status, label=spool.ddname, parent=self.uuid, user_data=spool):
+                text = spool.local_path.read_text(errors='replace')
+                w, h = dpg.get_text_size(text)
+
                 dpg.add_input_text(multiline=True,
-                                   width=-1,
-                                   height=-1,
-                                   default_value=spool.local_path.read_text(),
+                                   width=w + 50,
+                                   height=h + 10,
+                                   default_value=text,
                                    readonly=True)
+
+        dpg.delete_item(status)
 
     def mark_dirty(self):
         dpg.configure_item(self.uuid, label=self.dataset.name + '*')
@@ -100,6 +106,18 @@ class Editor:
         with dpg.tab_bar(tag='editor_tab_bar', reorderable=True, callback=self.on_tab_changed):
             self.empty_tab = Tab()
             self.tabs.append(self.empty_tab)
+
+        with dpg.theme(tag='job_tab_theme'):
+            with dpg.theme_component(dpg.mvTab):
+                dpg.add_theme_color(dpg.mvThemeCol_Tab, (40, 70, 50, 255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_TabActive, (40, 140, 78, 255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (30, 130, 68, 255), category=dpg.mvThemeCat_Core)
+
+        with dpg.theme(tag='dataset_tab_theme'):
+            with dpg.theme_component(dpg.mvTab):
+                dpg.add_theme_color(dpg.mvThemeCol_Tab, (50, 60, 80, 255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_TabActive, (50, 60, 150, 255), category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (30, 70, 130, 255), category=dpg.mvThemeCat_Core)
 
         with dpg.handler_registry():
             dpg.add_key_press_handler(dpg.mvKey_N, callback=self.new_file_keybind)
@@ -142,7 +160,7 @@ class Editor:
         if dataset.new:
             self.get_current_tab().mark_dirty()
 
-    def new_file(self):
+    def new_file(self, name=None):
         # Callback for creating a new file
         def create_file():
             dataset_name = dpg.get_value('new_file_dataset_input')
@@ -171,7 +189,7 @@ class Editor:
         w, h = 400, 100
         with dpg.window(tag='new_file_dialog', width=w, height=h, label='New'):
             dpg.add_input_text(hint='Dataset Name', tag='new_file_dataset_input', uppercase=True,
-                               on_enter=True, callback=create_file)
+                               on_enter=True, callback=create_file, default_value=name)
             # dpg.add_input_int(label='Record Length', tag='new_file_record_length', default_value=80, min_value=1, max_value=32767, step=0)
             dpg.add_combo(label='Type', items=('Normal', 'PDS'), tag='new_file_type', default_value='Normal')
             with dpg.group(horizontal=True):
@@ -190,18 +208,15 @@ class Editor:
 
         if tab.dirty:
             text: str = dpg.get_value(tab.editor)
-            lines = []
-            for line in text.split('\n'):
-                lines.append(line.ljust(tab.dataset.record_length))
-            tab.dataset.local_path.write_text(''.join(lines))
+            tab.dataset.local_path.write_text(text)
 
-            if not self.root.ftp.upload(tab.dataset.local_path):
+            if not self.root.ftp.upload(tab.dataset):
                 return
             tab.mark_clean()
 
-            current_search = dpg.get_value('explorer_search_input')
+            current_search = dpg.get_value('explorer_dataset_input')
             if current_search and current_search in tab.dataset.name:
-                self.root.explorer.refresh()
+                self.root.explorer.refresh_datasets()
 
     # Tabs
     def switch_to_tab(self, tab: Tab):

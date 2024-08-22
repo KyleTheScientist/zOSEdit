@@ -37,7 +37,8 @@ class Root:
                 with dpg.child_window(label="Explorer", width=width/4, height=-1, tag='win_explorer'):
                     self.explorer.build()
 
-                with dpg.child_window(label="Editor", width=-1, height=-1, menubar=False, tag='win_editor'):
+                with dpg.child_window(label="Editor", menubar=False, tag='win_editor',
+                                      width=-1, height=-1, horizontal_scrollbar=True):
                     self.editor.build()
 
         self.login()
@@ -67,7 +68,7 @@ class Root:
 
             dpg.set_value('login_status', f'Connecting to {host}...')
             try:
-                self.ftp = zFTP(host, username, password)
+                self.ftp = zFTP(self, host, username, password)
             except Exception as e:
                 dpg.set_value('login_status', f'Error connecting: {e}')
                 return

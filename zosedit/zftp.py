@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 from ftplib import FTP
 from .models import Dataset, Job, Spool
@@ -10,7 +11,8 @@ from textwrap import indent
 
 class zFTP:
 
-    def __init__(self, host, user, password):
+    def __init__(self, root, host, user, password):
+        self.root = root
         self.host = host
         self.user = user
         self.password = password
@@ -81,7 +83,7 @@ class zFTP:
             print('Error downloading', name)
             print(indent(format_exc(), '    '))
             print(e)
-            self.show_error(f'Error downloading dataset:\n{e}')
+            self.show_error(f'Error downloading dataset {name}:\n{e}')
             return
 
         path = tempdir / name
@@ -99,17 +101,14 @@ class zFTP:
             print(e)
             return
 
-    def upload(self, local_path: Path):
-        data = local_path.read_text()
+    def upload(self, dataset: Dataset):
         try:
-            with NamedTemporaryFile() as tmp:
-                tmp.write(data.encode('cp500'))
-                tmp.seek(0)
-                self.check_alive()
-                self.set_ftp_vars('SEQ')
-                self.ftp.storbinary(f"STOR '{local_path.name}'", tmp)
+            self.check_alive()
+            self.set_ftp_vars('SEQ')
+            self.set_ftp_vars('SEQ', RECFM='FB', LRECL=dataset.record_length, BLKSIZE=dataset.block_size)
+            self.ftp.storlines(f"STOR '{dataset.name}'", dataset.local_path.open('rb'))
         except Exception as e:
-            print('Error uploading', local_path)
+            print('Error uploading', dataset.name)
             print(indent(format_exc(), '    '))
             self.show_error(f'Error uploading dataset:\n{e}')
             return False
@@ -174,7 +173,6 @@ class zFTP:
         self.check_alive()
         self.set_ftp_vars('JES')
         exceptions = []
-        result = []
         for spool in spools:
             spool_name = f'{job.id}.{spool.id}'
             try:
@@ -183,7 +181,7 @@ class zFTP:
                 self.ftp.retrlines(f"RETR {spool_name}", lines.append)
                 path.write_text('\n'.join(lines))
                 spool.local_path = path
-                result.append(spool)
+                yield spool
             except Exception as e:
                 print(f'Error downloading spool:\n\t{spool}')
                 print(indent(format_exc(), '    '))
@@ -195,8 +193,6 @@ class zFTP:
             errors.append(f'Error downloading spool "{spool}":\n    {exception}')
         if errors:
             self.show_error('\n'.join(errors))
-
-        return result
 
     def list_spools(self, job_id):
         print(f'Listing spools for job {job_id}')
@@ -235,10 +231,17 @@ class zFTP:
         dpg.set_item_pos('error', (vw/2 - w/2, vh/2 - h/2))
 
     def show_response(self, response):
-        if dpg.does_item_exist('response'):
-            dpg.delete_item('response')
-        with dpg.window(label='FTP Response', tag='response', autosize=True, modal=True):
+        if dpg.does_item_exist('ftp_response'):
+            dpg.delete_item('ftp_response')
+        with dpg.window(label='FTP Response', tag='ftp_response', autosize=True, modal=True):
             dpg.add_text(response)
+            match = re.search(r'(J\d+|JOB\d+)', response)
+            if match:
+                id = match.group(0)
+                dpg.add_button(label=f'Open Job {id}',
+                               width=-1,
+                               callback=self._open_job_by_id,
+                               user_data=id)
 
         # center the response window
         w, h = dpg.get_text_size(response)
@@ -246,4 +249,9 @@ class zFTP:
             vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
         except:
             vw, vh = w, h
-        dpg.set_item_pos('response', (vw/2 - w/2, vh/2 - h/2))
+        dpg.set_item_pos('ftp_response', (vw/2 - w/2, vh/2 - h/2))
+
+    def _open_job_by_id(self, sender, data, id):
+        dpg.delete_item('ftp_response')
+        job = self.list_jobs(id=id)[0]
+        self.root.editor.open_job(job)
