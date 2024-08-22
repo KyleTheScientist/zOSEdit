@@ -1,0 +1,14 @@
+//{name} JOB {params}
+//CMD       EXEC PGM=SDSF
+//ISFOUT DD SYSOUT=*
+//CMDOUT DD SYSOUT=*
+//ISFIN  DD *
+  SET CONSOLE BATCH
+  SET DELAY 600
+  {command}
+  PRINT FILE CMDOUT
+  ULOG
+  PRINT
+  PRINT CLOSE
+/*
+//

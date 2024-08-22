@@ -138,7 +138,7 @@ class Editor:
     def open_job(self, job: Job):
         tab = self.get_tab_by_job(job)
         if not tab:
-            tab = Tab(ftp=self.root.ftp, job=job)
+            tab = Tab(ftp=self.root.zftp, job=job)
             self.tabs.append(tab)
         elif tab.dirty:
             self.switch_to_tab(tab)
@@ -150,7 +150,7 @@ class Editor:
     def open_file(self, dataset: Dataset):
         tab = self.get_tab_by_dataset(dataset.name)
         if not tab:
-            tab = Tab(ftp=self.root.ftp, dataset=dataset)
+            tab = Tab(ftp=self.root.zftp, dataset=dataset)
             self.tabs.append(tab)
         elif tab.dirty:
             self.switch_to_tab(tab)
@@ -176,7 +176,7 @@ class Editor:
             dataset.type = type_
 
             if type_ == 'PO':
-                self.root.ftp.mkdir(dataset)
+                self.root.zftp.mkdir(dataset)
             else:
                 self.open_file(dataset)
             dpg.delete_item('new_file_dialog')
@@ -210,7 +210,7 @@ class Editor:
             text: str = dpg.get_value(tab.editor)
             tab.dataset.local_path.write_text(text)
 
-            if not self.root.ftp.upload(tab.dataset):
+            if not self.root.zftp.upload(tab.dataset):
                 return
             tab.mark_clean()
 

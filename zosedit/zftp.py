@@ -1,41 +1,27 @@
 import re
 from typing import Literal
 from ftplib import FTP
-from .models import Dataset, Job, Spool
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from dearpygui import dearpygui as dpg
 from zosedit.constants import tempdir
 from traceback import format_exc
 from textwrap import indent
+from .models import Dataset, Job, Spool
+from zosedit.gui.dialog import dialog
+from . import constants
+
 
 class zFTP:
 
-    def __init__(self, root, host, user, password):
+    def __init__(self, root):
         self.root = root
-        self.host = host
-        self.user = user
-        self.password = password
-        self.reconnect()
+        self.host = None
+        self.user = None
+        self.password = None
+        self.ftp = None
 
-    def reconnect(self):
-        print('Attempting to connect to', self.host)
-        self.ftp = FTP(self.host)
-        self.ftp.login(user=self.user, passwd=self.password)
-
-    def quit(self):
-        try:
-            self.ftp.quit()
-        except Exception as e:
-            print('Error quitting')
-            print(indent(format_exc(), '    '))
-
-    def check_alive(self):
-        try:
-            self.ftp.voidcmd('NOOP')
-        except Exception as e:
-            self.reconnect()
-
+    ### Datasets
     def list_datasets(self, search_string: str):
         files = []
         try:
@@ -127,10 +113,14 @@ class zFTP:
             return False
         return True
 
-    def submit_job(self, dataset: Dataset):
+    ### Jobs
+    def submit_job(self, dataset: Dataset, download=True):
         try:
             self.check_alive()
-            path: Path = self.download_file(dataset.name)
+            if download:
+                path: Path = self.download_file(dataset.name)
+            else:
+                path = dataset.local_path
             self.ftp.set_debuglevel(2)
             self.set_ftp_vars('JES')
             response = self.ftp.storlines(f"STOR '{dataset.name}'", path.open('rb'))
@@ -141,6 +131,47 @@ class zFTP:
             self.show_error(f'Error submitting job:\n{e}')
             return False
         return True
+
+    def operator_command_prompt(self):
+        def _submit_command():
+            try:
+                jcl = constants.JCL['opercmd']
+                jcl = jcl.format(
+                    name=dpg.get_value('operator_command_job_name').ljust(10),
+                    params=dpg.get_value('operator_command_job_params'),
+                    command=dpg.get_value('operator_command_input')
+                )
+
+                with NamedTemporaryFile(delete=False) as f:
+                    path = Path(f.name)
+                    path.write_text(jcl)
+
+                self.check_alive()
+                self.set_ftp_vars('JES')
+                response = self.ftp.storlines(f"STOR 'ZEDITOPR'", path.open('rb'))
+
+                path.unlink()
+                dpg.delete_item('operator_command_prompt')
+                self.show_response(response)
+            except Exception as e:
+                print('Error submitting operator command')
+                print(indent(format_exc(), '    '))
+                dpg.delete_item('operator_command_prompt')
+                self.show_error(f'Error submitting operator command:\n{e}')
+                return
+
+        w, h = 420, 150
+        with dialog(tag='operator_command_prompt', label='Operator Command', width=w, height=h, modal=False):
+            dpg.add_input_text(label='Command', tag='operator_command_input', hint='/D A,<JOBNAME>',
+                               on_enter=True, callback=_submit_command)
+            dpg.add_spacer(height=5)
+
+            with dpg.collapsing_header(label="Advanced"):
+                dpg.add_input_text(label='Job Name', tag='operator_command_job_name', default_value='ZEDITOPR')
+                dpg.add_input_text(label='Job Card Params', tag='operator_command_job_params',
+                                   default_value='CLASS=A,MSGCLASS=X,MSGLEVEL=(1,1),NOTIFY=&SYSUID')
+
+            dpg.add_button(label='Submit', callback=_submit_command)
 
     def list_jobs(self, name=None, id=None, owner=None):
         name = name or '*'
@@ -176,7 +207,7 @@ class zFTP:
         for spool in spools:
             spool_name = f'{job.id}.{spool.id}'
             try:
-                path = tempdir / f'{job.name}({job.id})-{spool.ddname}.txt'
+                path = tempdir / f'{job.id}-{spool.ddname}.txt'
                 lines = []
                 self.ftp.retrlines(f"RETR {spool_name}", lines.append)
                 path.write_text('\n'.join(lines))
@@ -210,30 +241,13 @@ class zFTP:
 
         return [Spool(spool_str) for spool_str in raw_data[4:-1]]
 
-    def set_ftp_vars(self, mode=Literal['SEQ', 'JES', 'SQL'], **kwargs):
-        self.check_alive()
-        args = ' '.join(f"{key}={value}" for key, value in kwargs.items())
-        self.ftp.sendcmd(f'SITE RESET')
-        self.ftp.sendcmd(f'SITE FILETYPE={mode} {args}')
-
+    ### Dialogs
     def show_error(self, message):
-        if dpg.does_item_exist('error'):
-            dpg.delete_item('error')
-        with dpg.window(label='FTP Error', tag='error', autosize=True, modal=True):
+        with dialog(label='FTP Error', tag='error', autosize=True):
             dpg.add_text(message, color=(255, 0, 0))
 
-        # center the error window
-        w, h = dpg.get_text_size(message)
-        try:
-            vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
-        except:
-            vw, vh = w, h
-        dpg.set_item_pos('error', (vw/2 - w/2, vh/2 - h/2))
-
     def show_response(self, response):
-        if dpg.does_item_exist('ftp_response'):
-            dpg.delete_item('ftp_response')
-        with dpg.window(label='FTP Response', tag='ftp_response', autosize=True, modal=True):
+        with dialog(label='FTP Response', tag='ftp_response', width=300, height=150):
             dpg.add_text(response)
             match = re.search(r'(J\d+|JOB\d+)', response)
             if match:
@@ -242,16 +256,39 @@ class zFTP:
                                width=-1,
                                callback=self._open_job_by_id,
                                user_data=id)
-
-        # center the response window
-        w, h = dpg.get_text_size(response)
-        try:
-            vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
-        except:
-            vw, vh = w, h
-        dpg.set_item_pos('ftp_response', (vw/2 - w/2, vh/2 - h/2))
+        print(response)
 
     def _open_job_by_id(self, sender, data, id):
         dpg.delete_item('ftp_response')
         job = self.list_jobs(id=id)[0]
         self.root.editor.open_job(job)
+
+    ### Connection
+    def connect(self, host, user, password):
+        print('Attempting to connect to', host)
+        self.ftp = FTP(host)
+        self.ftp.login(user=user, passwd=password)
+        self.host = host
+        self.user = user
+        self.password = password
+        return True
+
+    def quit(self):
+        try:
+            if self.ftp:
+                self.ftp.quit()
+        except Exception as e:
+            print('Error quitting')
+            print(indent(format_exc(), '    '))
+
+    def check_alive(self):
+        try:
+            self.ftp.voidcmd('NOOP')
+        except Exception as e:
+            self.connect()
+
+    def set_ftp_vars(self, mode=Literal['SEQ', 'JES', 'SQL'], **kwargs):
+        self.check_alive()
+        args = ' '.join(f"{key}={value}" for key, value in kwargs.items())
+        self.ftp.sendcmd(f'SITE RESET')
+        self.ftp.sendcmd(f'SITE FILETYPE={mode} {args}')

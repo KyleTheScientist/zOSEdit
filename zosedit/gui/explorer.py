@@ -66,7 +66,7 @@ class Explorer:
             # Search for jobs
             status = dpg.add_text('Searching...')
             try:
-                jobs = self.root.ftp.list_jobs(name, id, owner)
+                jobs = self.root.zftp.list_jobs(name, id, owner)
             except Exception as e:
                 dpg.set_value(status, f'Error: {e}')
                 print('Error listing jobs')
@@ -102,7 +102,7 @@ class Explorer:
         with self.empty_results('dataset_results'): # Clears existing results
             # Search for datasets
             status = dpg.add_text('Searching...')
-            datasets = [d for d in self.root.ftp.list_datasets(search) if d.type is not None]
+            datasets = [d for d in self.root.zftp.list_datasets(search) if d.type is not None]
             dpg.set_value(status, f'Found {len(datasets)} dataset(s)')
 
             # List results
@@ -142,7 +142,7 @@ class Explorer:
     def populate_pds(self, dataset: Dataset, id: int):
         if dataset._populated:
             return
-        members = self.root.ftp.get_members(dataset)
+        members = self.root.zftp.get_members(dataset)
         if not members:
             dpg.add_text('No members found', parent=id, indent=10)
             return
@@ -166,7 +166,7 @@ class Explorer:
 
     def _submit_file(self, dataset: Dataset):
         def callback():
-            self.root.ftp.submit_job(dataset)
+            self.root.zftp.submit_job(dataset)
         return callback
 
     def _open_job(self, job):
@@ -186,7 +186,7 @@ class Explorer:
 
     def delete_file(self, sender, data, dataset):
         dpg.delete_item('delete_file_dialog')
-        self.root.ftp.delete(dataset)
+        self.root.zftp.delete(dataset)
         self.root.editor.close_tab_by_dataset(dataset)
         self.refresh_datasets()
 
