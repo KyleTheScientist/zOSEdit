@@ -122,8 +122,7 @@ class zFTP:
     def operator_command_prompt(self):
         def _submit_command():
             try:
-                jcl = constants.JCL['opercmd']
-                jcl = jcl.format(
+                jcl = constants.OPERCMD_JCL.format(
                     name=dpg.get_value('operator_command_job_name').ljust(10),
                     params=dpg.get_value('operator_command_job_params'),
                     command=dpg.get_value('operator_command_input')
