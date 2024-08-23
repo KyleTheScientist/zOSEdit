@@ -33,6 +33,15 @@ class Explorer:
                         dpg.add_button(label='Search', callback=self.refresh_jobs)
                     dpg.add_child_window(label='Results', tag='job_results')
 
+        with dpg.theme(tag='rc_theme_fail'):
+            with dpg.theme_component(dpg.mvSelectable):
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (140, 120, 80, 255))
+
+        with dpg.theme(tag='rc_theme_success'):
+            with dpg.theme_component(dpg.mvSelectable):
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (50, 140, 80, 255))
+
+
     def on_tab_changed(self):
         pass
 
@@ -54,7 +63,6 @@ class Explorer:
         self.refresh_jobs()
 
     def refresh_jobs(self):
-        print('Refreshing jobs')
         name = dpg.get_value('explorer_jobname_input')
         id = dpg.get_value('explorer_jobid_input')
         owner = dpg.get_value('explorer_jobowner_input')
@@ -86,7 +94,8 @@ class Explorer:
                         dpg.add_selectable(span_columns=True, label=job.id, callback=self._open_job(job))
                         dpg.add_selectable(span_columns=True, label=job.name, callback=self._open_job(job))
                         dpg.add_selectable(span_columns=True, label=job.owner, callback=self._open_job(job))
-                        dpg.add_selectable(span_columns=True, label=job.rc, callback=self._open_job(job))
+                        rc = dpg.add_selectable(span_columns=True, label=job.rc, callback=self._open_job(job))
+                        dpg.bind_item_theme(rc, 'rc_theme_fail' if job.rc else 'rc_theme_success')
 
     def refresh_datasets(self):
         # Get datasets
@@ -138,18 +147,21 @@ class Explorer:
             dpg.add_item_clicked_handler(dpg.mvMouseButton_Right, callback=lambda: dpg.configure_item(context_menu, show=True))
         dpg.bind_item_handler_registry(header, reg)
 
-
     def populate_pds(self, dataset: Dataset, id: int):
         if dataset._populated:
             return
+
+        # Load members
+        status = dpg.add_text('Loading members...', parent=id, indent=10)
         members = self.root.zftp.get_members(dataset)
         if not members:
-            dpg.add_text('No members found', parent=id, indent=10)
+            dpg.set_value(status, 'No members found')
             return
+        dpg.delete_item(status)
 
+        # List members
         for member in members:
             self.entry(dataset=dataset(member), leaf=True, parent=id, indent=10)
-
 
     def _populate_pds(self, dataset: Dataset, parent: int):
         return lambda: self.populate_pds(dataset, parent)

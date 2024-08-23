@@ -1,5 +1,5 @@
 from dearpygui import dearpygui as dpg
-from zosedit.models import Dataset, Job
+from zosedit.models import Dataset, Job, Spool
 from zosedit.constants import tempdir
 from zosedit.zftp import zFTP
 from pathlib import Path
@@ -23,27 +23,34 @@ class Tab:
             self.uuid = dpg.add_tab(label='   ', closable=False, parent='editor_tab_bar')
 
     def build_dataset_tab(self):
+        dataset: Dataset = self.dataset
+
+        # Clear existing tab / create new tab
         if self.uuid:
             for child in dpg.get_item_children(self.uuid)[1]:
                 dpg.delete_item(child)
         else:
-            self.uuid = dpg.add_tab(label=self.dataset.name, closable=True, parent='editor_tab_bar')
-            self.label = self.dataset.name
+            self.uuid = dpg.add_tab(label=dataset.name, closable=True, parent='editor_tab_bar')
+            self.label = dataset.name
 
+        # Setup tab
         dpg.bind_item_theme(self.uuid, 'dataset_tab_theme')
         dpg.set_value('editor_tab_bar', self.uuid)
+        with dpg.child_window(parent=self.uuid, height=dpg.get_text_size('')[1] + 30, horizontal_scrollbar=True):
+            dpg.add_text(str(dataset))
 
-        if self.dataset.new:
+        # Get file content
+        if dataset.new:
             self.mark_dirty()
         else:
             status = dpg.add_text('Downloading...', parent=self.uuid)
-            local_path = self.ftp.download_file(self.dataset.name)
-            self.dataset.local_path = local_path
+            self.ftp.download(dataset)
             dpg.delete_item(status)
-
-        content = self.dataset.local_path.read_text(errors='replace')
+        content = dataset.local_path.read_text(errors='replace')
         lines = [line.rstrip() for line in content.split('\n')]
         text = '\n'.join(lines)
+
+        # Create editor
         self.editor = dpg.add_input_text(
             parent=self.uuid,
             default_value=text,
@@ -54,9 +61,11 @@ class Tab:
             tab_input=True,
             user_data=self)
 
+
     def build_job_tab(self):
         label = f'{self.job.id} ({self.job.name})'
 
+        # Clear existing tab / create new tab
         if self.uuid:
             for child in dpg.get_item_children(self.uuid)[1]:
                 dpg.delete_item(child)
@@ -64,24 +73,48 @@ class Tab:
             self.uuid = dpg.add_tab(label=label, closable=True, parent='editor_tab_bar')
             self.label = label
 
+        # Setup tab
         dpg.bind_item_theme(self.uuid, 'job_tab_theme')
-
         dpg.set_value('editor_tab_bar', self.uuid)
-        dpg.add_text(self.job.string, parent=self.uuid)
+
+        # Info/status
+        with dpg.child_window(parent=self.uuid, height=dpg.get_text_size('')[1] + 30, horizontal_scrollbar=True):
+            dpg.add_text(str(self.job))
         status = dpg.add_text('Downloading spool...', parent=self.uuid)
 
-        for spool in self.ftp.download_spools(self.job):
-            with dpg.collapsing_header(before=status, label=spool.ddname, parent=self.uuid, user_data=spool):
-                text = spool.local_path.read_text(errors='replace')
-                w, h = dpg.get_text_size(text)
-
-                dpg.add_input_text(multiline=True,
-                                   width=w + 50,
-                                   height=h + 10,
-                                   default_value=text,
-                                   readonly=True)
-
+        # Create spool dropdowns
+        for spool in self.ftp.list_spools(self.job):
+            header = dpg.add_collapsing_header(before=status, label=spool.ddname, parent=self.uuid)
+            with dpg.item_handler_registry() as reg:
+                dpg.add_item_toggled_open_handler(callback=self._populate_spool, user_data=(header,spool))
+            dpg.bind_item_handler_registry(header, reg)
         dpg.delete_item(status)
+
+
+    def _populate_spool(self, sender, data, user_data):
+        header, spool = user_data
+
+        if dpg.get_item_children(header)[1]: # Already populated
+            return
+
+        # Info/status
+        with dpg.child_window(parent=header, height=dpg.get_text_size('')[1] + 30, horizontal_scrollbar=True):
+            dpg.add_text(str(spool))
+        status = dpg.add_text('Downloading...', parent=header)
+        if not self.ftp.download_spool(spool):
+            dpg.configure_item(header, label='Download failed')
+            return
+        dpg.delete_item(status)
+
+        # Display spool
+        text = spool.local_path.read_text()
+        w, h = dpg.get_text_size(text)
+        with dpg.child_window(parent=header, height=h + 30, horizontal_scrollbar=True):
+            dpg.add_input_text(multiline=True,
+                               width=w + 50,
+                               height=-1,
+                               default_value=text,
+                               readonly=True)
 
     def mark_dirty(self):
         dpg.configure_item(self.uuid, label=self.dataset.name + '*')
@@ -103,9 +136,7 @@ class Editor:
         self.tabs = []
 
     def build(self):
-        with dpg.tab_bar(tag='editor_tab_bar', reorderable=True, callback=self.on_tab_changed):
-            self.empty_tab = Tab()
-            self.tabs.append(self.empty_tab)
+        dpg.add_tab_bar(tag='editor_tab_bar', reorderable=True, callback=self.on_tab_changed)
 
         with dpg.theme(tag='job_tab_theme'):
             with dpg.theme_component(dpg.mvTab):
@@ -126,10 +157,10 @@ class Editor:
             dpg.add_key_press_handler(dpg.mvKey_Tab, callback=self.switch_tab_keybind)
 
     def reset(self):
-        tabs = [tab for tab in self.tabs if tab is not self.empty_tab]
+        tabs = [tab for tab in self.tabs]
         for tab in tabs:
             self.delete_tab(tab)
-        self.tabs = [self.empty_tab]
+        self.tabs = []
 
     def on_tab_changed(self):
         self.update_internal_state()
@@ -160,11 +191,11 @@ class Editor:
         if dataset.new:
             self.get_current_tab().mark_dirty()
 
-    def new_file(self, name=None):
+    def new_file(self, name=''):
         # Callback for creating a new file
         def create_file():
             dataset_name = dpg.get_value('new_file_dataset_input')
-            # record_length = dpg.get_value('new_file_record_length')
+            # reclength = dpg.get_value('new_file_reclength')
             type_ = dpg.get_value('new_file_type')
             type_ = 'PO' if type_ == 'PDS' else 'PS'
 
@@ -172,7 +203,7 @@ class Editor:
             dataset.new = True
             dataset.local_path = Path(tempdir, dataset_name)
             dataset.local_path.write_text('')
-            dataset.record_length = 80 # HACK
+            dataset.reclength = 80 # HACK
             dataset.type = type_
 
             if type_ == 'PO':
@@ -268,9 +299,8 @@ class Editor:
     def close_tab_keybind(self):
         if dpg.is_key_down(dpg.mvKey_Control):
             tab = self.get_current_tab()
-            if tab is self.empty_tab:
-                return
-            self.delete_tab(tab)
+            if tab:
+                self.delete_tab(tab)
 
     def delete_tab(self, tab: Tab):
         dpg.delete_item(tab.uuid)
@@ -291,7 +321,7 @@ class Editor:
             _tabs.sort(key=lambda x: dpg.get_item_rect_min(x.uuid)[0])
             self.tabs = _tabs
         except Exception as e:
-            print('Error updating internal state:', e)
+            pass
 
 
 

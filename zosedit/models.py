@@ -2,7 +2,7 @@ import re
 
 
 class Dataset:
-    cols = 'volume', 'unit', 'date', 'ext', 'used', 'record_format', 'record_length', 'block_size', 'type', 'name'
+    cols = 'volume', 'unit', 'date', 'ext', 'used', 'recformat', 'reclength', 'block_size', 'type', 'name'
 
     def __init__(self, string, member: str = None):
         self.string = string
@@ -14,8 +14,8 @@ class Dataset:
         self.date: str = None
         self.ext: int = None
         self.used: int = None
-        self.record_format: str = None
-        self.record_length: int = None
+        self.recformat: str = None
+        self.reclength: int = None
         self.block_size: int = None
         self.type: str = None
         self.name: str = None
@@ -34,14 +34,10 @@ class Dataset:
             if self.member:
                 self.name = f"{self.name}({self.member})"
 
-            self.record_length = int(self.record_length)
+            self.reclength = int(self.reclength)
         except Exception as e:
             print('Error parsing dataset:', e)
             print(string)
-
-        # self.used = int(self.used)
-        # self.ext = int(self.ext)
-        # self.block_size = int(self.block_size)
 
     def is_partitioned(self):
         return self.type == 'PO'
@@ -49,6 +45,9 @@ class Dataset:
     def __repr__(self):
         attrs = ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
         return f"Dataset({attrs})"
+
+    def __str__(self):
+        return ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
 
     def __call__(self, member: str) -> 'Dataset':
         if not member:
@@ -79,8 +78,13 @@ class Job:
             for col, value in zip(self.cols, string.split()):
                 setattr(self, col, value)
 
-            if self.rc and '=' in self.rc:
-                self.rc = int(self.rc.split('=')[1])
+            if self.rc:
+                if '=' in self.rc:
+                    self.rc = self.rc.split('=')[1]
+                    if self.rc.isdecimal():
+                        self.rc = int(self.rc)
+                else:
+                    self.rc = self.rc.replace('_', '').replace('(', '').replace(')', '')
             if self.spool_count is not None:
                 self.spool_count = int(self.spool_count.split()[0])
         except Exception as e:
@@ -94,13 +98,16 @@ class Job:
         attrs = ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
         return f"Job({attrs})"
 
+    def __str__(self):
+        return ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
 
 class Spool:
 
     cols = 'id', 'stepname', 'procstep', 'c', 'ddname', 'byte_count'
 
-    def __init__(self, string: str):
+    def __init__(self, string: str, job: Job):
         self.string = string
+        self.job = job
 
         self.id: str = None
         self.stepname: str = None
@@ -124,4 +131,7 @@ class Spool:
 
     def __repr__(self):
         attrs = ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
-        return f"Spool({attrs})"
+        return f"Spool({self.job.id}, {attrs})"
+
+    def __str__(self):
+        return ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)

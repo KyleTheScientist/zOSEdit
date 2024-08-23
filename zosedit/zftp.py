@@ -54,7 +54,7 @@ class zFTP:
         dataset._populated = True
         return members[1:] if members else []
 
-    def download_file(self, name):
+    def download(self, dataset: Dataset):
         raw_data = []
         # Download file
         def write(data):
@@ -63,18 +63,15 @@ class zFTP:
         try:
             self.check_alive()
             self.set_ftp_vars('SEQ')
-            self.ftp.retrlines(f"RETR '{name}'", write)
+            self.ftp.retrlines(f"RETR '{dataset.name}'", write)
             content = '\n'.join(raw_data)
+            path = tempdir / dataset.name
+            path.write_text(content)
+            dataset.local_path = path
+            return True
         except Exception as e:
-            print('Error downloading', name)
-            print(indent(format_exc(), '    '))
-            print(e)
-            self.show_error(f'Error downloading dataset {name}:\n{e}')
-            return
-
-        path = tempdir / name
-        path.write_text(content)
-        return path
+            self.show_error(f'Error downloading dataset {dataset.name}:\n{e}')
+            return False
 
     def mkdir(self, dataset: Dataset):
         try:
@@ -82,20 +79,16 @@ class zFTP:
             self.set_ftp_vars('SEQ')
             self.ftp.mkd(f"'{dataset.name}'")
         except Exception as e:
-            print('Error creating PDS', dataset)
-            print(indent(format_exc(), '    '))
-            print(e)
+            self.show_error(f'Error creating partitioned dataset:\n{e}')
             return
 
     def upload(self, dataset: Dataset):
         try:
             self.check_alive()
             self.set_ftp_vars('SEQ')
-            self.set_ftp_vars('SEQ', RECFM='FB', LRECL=dataset.record_length, BLKSIZE=dataset.block_size)
+            self.set_ftp_vars('SEQ', RECFM='FB', LRECL=dataset.reclength, BLKSIZE=dataset.block_size)
             self.ftp.storlines(f"STOR '{dataset.name}'", dataset.local_path.open('rb'))
         except Exception as e:
-            print('Error uploading', dataset.name)
-            print(indent(format_exc(), '    '))
             self.show_error(f'Error uploading dataset:\n{e}')
             return False
         return True
@@ -107,8 +100,6 @@ class zFTP:
             self.ftp.delete(f"'{dataset.name}'")
             print('Deleted', dataset.name)
         except Exception as e:
-            print('Error deleting', dataset)
-            print(indent(format_exc(), '    '))
             self.show_error(f'Error deleting dataset:\n{e}')
             return False
         return True
@@ -117,17 +108,13 @@ class zFTP:
     def submit_job(self, dataset: Dataset, download=True):
         try:
             self.check_alive()
-            if download:
-                path: Path = self.download_file(dataset.name)
-            else:
-                path = dataset.local_path
-            self.ftp.set_debuglevel(2)
+            if download and not self.download(dataset):
+                return False
+            path = dataset.local_path
             self.set_ftp_vars('JES')
             response = self.ftp.storlines(f"STOR '{dataset.name}'", path.open('rb'))
             self.show_response(response)
         except Exception as e:
-            print('Error submitting job')
-            print(indent(format_exc(), '    '))
             self.show_error(f'Error submitting job:\n{e}')
             return False
         return True
@@ -154,8 +141,6 @@ class zFTP:
                 dpg.delete_item('operator_command_prompt')
                 self.show_response(response)
             except Exception as e:
-                print('Error submitting operator command')
-                print(indent(format_exc(), '    '))
                 dpg.delete_item('operator_command_prompt')
                 self.show_error(f'Error submitting operator command:\n{e}')
                 return
@@ -177,7 +162,6 @@ class zFTP:
         name = name or '*'
         owner = owner or '*'
         id = id or '*'
-        print(f'Listing jobs with name={name}, owner={owner}, id={id}')
         raw_data: list[str] = []
         try:
             self.check_alive()
@@ -186,8 +170,6 @@ class zFTP:
         except Exception as e:
             if '550' in str(e):
                 return []
-            print('Error listing jobs')
-            print(indent(format_exc(), '    '))
             self.show_error(f'Error listing jobs:\n{e}')
             return []
 
@@ -198,8 +180,7 @@ class zFTP:
         return [Job(job_str) for job_str in raw_data[1:]]
 
     def download_spools(self, job: Job):
-        print(f'Downloading spools for job {job.id}')
-        spools = self.list_spools(job.id)
+        spools = self.list_spools(job)
 
         self.check_alive()
         self.set_ftp_vars('JES')
@@ -214,8 +195,6 @@ class zFTP:
                 spool.local_path = path
                 yield spool
             except Exception as e:
-                print(f'Error downloading spool:\n\t{spool}')
-                print(indent(format_exc(), '    '))
                 exceptions.append((spool, e))
                 continue
 
@@ -225,24 +204,35 @@ class zFTP:
         if errors:
             self.show_error('\n'.join(errors))
 
-    def list_spools(self, job_id):
-        print(f'Listing spools for job {job_id}')
+    def download_spool(self, spool: Spool):
+        try:
+            path = tempdir / f'{spool.id}.txt'
+            lines = []
+            self.check_alive()
+            self.set_ftp_vars('JES')
+            self.ftp.retrlines(f"RETR {spool.job.id}.{spool.id}", lines.append)
+            path.write_text('\n'.join(lines))
+            spool.local_path = path
+            return True
+        except Exception as e:
+            self.show_error(f'Error downloading spool {spool.id}:\n{e}')
+            return False
 
+    def list_spools(self, job: Job):
         raw_data: list[str] = []
         try:
             self.check_alive()
             self.set_ftp_vars('JES')
-            self.ftp.dir(job_id, raw_data.append)
+            self.ftp.dir(job.id, raw_data.append)
         except Exception as e:
-            print('Error listing spool outputs')
-            print(indent(format_exc(), '    '))
             self.show_error(f'Error listing spool outputs:\n{e}')
             return []
 
-        return [Spool(spool_str) for spool_str in raw_data[4:-1]]
+        return [Spool(spool_str, job) for spool_str in raw_data[4:-1]]
 
     ### Dialogs
     def show_error(self, message):
+        print(indent(message, '    '))
         with dialog(label='FTP Error', tag='error', autosize=True):
             dpg.add_text(message, color=(255, 0, 0))
 
@@ -264,13 +254,15 @@ class zFTP:
         self.root.editor.open_job(job)
 
     ### Connection
-    def connect(self, host, user, password):
-        print('Attempting to connect to', host)
-        self.ftp = FTP(host)
-        self.ftp.login(user=user, passwd=password)
+    def connect(self, host=None, user=None, password=None):
+        self.ftp = FTP(host or self.host)
+        print('Connecting to', host or self.host)
+        self.ftp.login(user=user or self.user, passwd=password or self.password)
         self.host = host
         self.user = user
         self.password = password
+        self.ftp.set_debuglevel(2)
+
         return True
 
     def quit(self):
