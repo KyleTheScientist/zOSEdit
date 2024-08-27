@@ -1,4 +1,5 @@
 import re
+import ebcdic
 from typing import Literal
 from ftplib import FTP
 from pathlib import Path
@@ -10,22 +11,46 @@ from textwrap import indent
 from .models import Dataset, Job, Spool
 from zosedit.gui.dialog import dialog
 from . import constants
+from time import time
 
+
+def waits(func):
+    def wrapper(self, *args, **kwargs):
+        self.waiting = True
+        self.wait_start = dpg.get_frame_count()
+        try:
+            result = func(self, *args, **kwargs)
+        except Exception as e:
+            self.waiting = False
+            raise e
+        self.waiting = False
+        return result
+    return wrapper
 
 class zFTP:
+
+    KEEP_ALIVE_INTERVAL = 60
 
     def __init__(self, root):
         self.root = root
         self.host = None
         self.user = None
         self.password = None
+        self.waiting = False
+        self.wait_start = 0
         self.ftp = None
+        self.last_keep_alive = time()
+
+    def keep_alive(self):
+        if time() - self.last_keep_alive > self.KEEP_ALIVE_INTERVAL:
+            self.check_alive()
+            self.last_keep_alive = time()
 
     ### Datasets
+    @waits
     def list_datasets(self, search_string: str):
         files = []
         try:
-            self.check_alive()
             self.set_ftp_vars('SEQ')
             self.ftp.dir(search_string, files.append)
         except Exception as e:
@@ -39,12 +64,12 @@ class zFTP:
         datasets = sorted(datasets, key=lambda x: x.is_partitioned())
         return datasets
 
+    @waits
     def get_members(self, dataset: Dataset):
         members = []
         def append(line):
             members.append(line.split()[0])
         try:
-            self.check_alive()
             self.set_ftp_vars('SEQ')
             self.ftp.dir(f"'{dataset.name}(*)'", append)
         except Exception as e:
@@ -54,6 +79,7 @@ class zFTP:
         dataset._populated = True
         return members[1:] if members else []
 
+    @waits
     def download(self, dataset: Dataset):
         raw_data = []
         # Download file
@@ -61,41 +87,42 @@ class zFTP:
             raw_data.append(data)
 
         try:
-            self.check_alive()
             self.set_ftp_vars('SEQ')
             self.ftp.retrlines(f"RETR '{dataset.name}'", write)
             content = '\n'.join(raw_data)
             path = tempdir / dataset.name
-            path.write_text(content)
+            path.write_text(content, errors='replace')
             dataset.local_path = path
             return True
         except Exception as e:
             self.show_error(f'Error downloading dataset {dataset.name}:\n{e}')
             return False
 
+    @waits
     def mkdir(self, dataset: Dataset):
         try:
-            self.check_alive()
             self.set_ftp_vars('SEQ')
             self.ftp.mkd(f"'{dataset.name}'")
         except Exception as e:
             self.show_error(f'Error creating partitioned dataset:\n{e}')
             return
 
+    @waits
     def upload(self, dataset: Dataset):
         try:
-            self.check_alive()
-            self.set_ftp_vars('SEQ')
-            self.set_ftp_vars('SEQ', RECFM='FB', LRECL=dataset.reclength, BLKSIZE=dataset.block_size)
-            self.ftp.storlines(f"STOR '{dataset.name}'", dataset.local_path.open('rb'))
+            if dataset.member:
+                self.set_ftp_vars('SEQ')
+            else:
+                self.set_ftp_vars('SEQ', RECFM=dataset.recformat, LRECL=dataset.reclength, BLKSIZE=dataset.block_size)
+            self.ftp.storbinary(f"STOR '{dataset.name}'", dataset.local_path.open('rb'))
         except Exception as e:
             self.show_error(f'Error uploading dataset:\n{e}')
             return False
         return True
 
+    @waits
     def delete(self, dataset: Dataset):
         try:
-            self.check_alive()
             self.set_ftp_vars('SEQ')
             self.ftp.delete(f"'{dataset.name}'")
             print('Deleted', dataset.name)
@@ -105,9 +132,9 @@ class zFTP:
         return True
 
     ### Jobs
+    @waits
     def submit_job(self, dataset: Dataset, download=True):
         try:
-            self.check_alive()
             if download and not self.download(dataset):
                 return False
             path = dataset.local_path
@@ -119,6 +146,7 @@ class zFTP:
             return False
         return True
 
+    @waits
     def operator_command_prompt(self):
         def _submit_command():
             try:
@@ -132,7 +160,6 @@ class zFTP:
                     path = Path(f.name)
                     path.write_text(jcl)
 
-                self.check_alive()
                 self.set_ftp_vars('JES')
                 response = self.ftp.storlines(f"STOR 'ZEDITOPR'", path.open('rb'))
 
@@ -157,14 +184,14 @@ class zFTP:
 
             dpg.add_button(label='Submit', callback=_submit_command)
 
+    @waits
     def list_jobs(self, name=None, id=None, owner=None):
         name = name or '*'
         owner = owner or '*'
         id = id or '*'
         raw_data: list[str] = []
         try:
-            self.check_alive()
-            self.set_ftp_vars(f'JES', JESJOBNAME=name, JESOWNER=owner)
+            self.set_ftp_vars(f'JES', JESJOBNAME=name, JESOWNER=owner, JESENTRYLIMIT=1000)
             self.ftp.dir(id, raw_data.append)
         except Exception as e:
             if '550' in str(e):
@@ -178,10 +205,10 @@ class zFTP:
 
         return [Job(job_str) for job_str in raw_data[1:]]
 
+    @waits
     def download_spools(self, job: Job):
         spools = self.list_spools(job)
 
-        self.check_alive()
         self.set_ftp_vars('JES')
         exceptions = []
         for spool in spools:
@@ -203,24 +230,24 @@ class zFTP:
         if errors:
             self.show_error('\n'.join(errors))
 
+    @waits
     def download_spool(self, spool: Spool):
         try:
             path = tempdir / f'{spool.id}.txt'
             lines = []
-            self.check_alive()
             self.set_ftp_vars('JES')
             self.ftp.retrlines(f"RETR {spool.job.id}.{spool.id}", lines.append)
             path.write_text('\n'.join(lines))
             spool.local_path = path
             return True
         except Exception as e:
-            self.show_error(f'Error downloading spool {spool.id}:\n{e}')
+            self.show_error(f'Error downloading spool {spool.job.id}.{spool.ddname}:\n{e}')
             return False
 
+    @waits
     def list_spools(self, job: Job):
         raw_data: list[str] = []
         try:
-            self.check_alive()
             self.set_ftp_vars('JES')
             self.ftp.dir(job.id, raw_data.append)
         except Exception as e:
@@ -232,6 +259,7 @@ class zFTP:
     ### Dialogs
     def show_error(self, message):
         print(indent(message, '    '))
+        print(format_exc())
         with dialog(label='FTP Error', tag='error', autosize=True):
             dpg.add_text(message, color=(255, 0, 0))
 
@@ -253,9 +281,13 @@ class zFTP:
         self.root.editor.open_job(job)
 
     ### Connection
+    @waits
     def connect(self, host=None, user=None, password=None):
+        host = host or self.host
+        user = user or self.user
+        password = password or self.password
+        print(f'Connecting: {user}@{host}')
         self.ftp = FTP(host or self.host)
-        print('Connecting to', host or self.host)
         self.ftp.login(user=user or self.user, passwd=password or self.password)
         self.host = host
         self.user = user
@@ -264,6 +296,16 @@ class zFTP:
 
         return True
 
+    @waits
+    def check_alive(self):
+        try:
+            if self.ftp:
+                self.ftp.voidcmd('NOOP')
+        except Exception as e:
+            self.quit()
+            self.connect()
+
+    @waits
     def quit(self):
         try:
             if self.ftp:
@@ -272,11 +314,6 @@ class zFTP:
             print('Error quitting')
             print(indent(format_exc(), '    '))
 
-    def check_alive(self):
-        try:
-            self.ftp.voidcmd('NOOP')
-        except Exception as e:
-            self.connect()
 
     def set_ftp_vars(self, mode=Literal['SEQ', 'JES', 'SQL'], **kwargs):
         self.check_alive()

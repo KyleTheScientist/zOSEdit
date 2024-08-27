@@ -137,7 +137,6 @@ class Explorer:
                 dpg.add_menu_item(label='Open', callback=self._open_file(dataset))
                 dpg.add_menu_item(label='Submit', callback=self._submit_file(dataset))
             else:
-                name = dataset.name + '()'
                 dpg.add_menu_item(label='Create member', callback=self._new_member(dataset))
             dpg.add_menu_item(label='Delete', callback=self.try_delete_file, user_data=dataset)
 

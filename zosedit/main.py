@@ -36,17 +36,19 @@ class Root:
                 with dpg.menu(label="Session", tag='session_menu'):
                     dpg.add_menu_item(label="Login", callback=self.login)
                     dpg.add_menu_item(label="Logout", callback=self.logout)
+                # with dpg.menu(label='Settings'):
+                #     dpg.add_menu_item(label='Show Style Editor', callback=dpg.show_style_editor)
 
             with dpg.handler_registry():
                 dpg.add_key_press_handler(dpg.mvKey_F1, callback=self.zftp.operator_command_prompt)
 
             width = dpg.get_viewport_width()
             with dpg.group(horizontal=True):
-                with dpg.child_window(label="Explorer", width=width/4, height=-1, tag='win_explorer'):
+                with dpg.child_window(label="Explorer", width=width/4, height=-1, tag='win_explorer', border=False):
                     self.explorer.build()
 
-                with dpg.child_window(label="Editor", menubar=False, tag='win_editor',
-                                      width=-1, height=-1, horizontal_scrollbar=True):
+                with dpg.child_window(label="Editor", menubar=False, tag='win_editor', border=False,
+                                    width=-1, height=-1, horizontal_scrollbar=True):
                     self.editor.build()
 
         self.login()
@@ -54,9 +56,31 @@ class Root:
         dpg.set_primary_window(main, True)
         dpg.setup_dearpygui()
         dpg.show_viewport()
+
         while dpg.is_dearpygui_running():
+            if self.zftp.waiting:
+                self.waiting_animation()
+            elif dpg.does_item_exist('overlay'):
+                dpg.delete_item('overlay')
             dpg.render_dearpygui_frame()
         dpg.destroy_context()
+
+    def waiting_animation(self):
+        if not dpg.does_item_exist('overlay'):
+            dpg.add_viewport_drawlist(tag='overlay')
+
+        width = 100
+        margin = 30
+        xmin = dpg.get_viewport_width() - width - margin
+        xmax = dpg.get_viewport_width() - margin
+        y = 10
+        dpg.draw_line((xmin, y), (xmax, y), color=(37, 37, 38), parent='overlay')
+        x1 = ((dpg.get_frame_count() - self.zftp.wait_start)) % width
+        x2 = ((dpg.get_frame_count() - self.zftp.wait_start) + 10) % width
+        if (x2 < x1):
+            x2 = xmax - xmin
+        # dpg.draw_text((x, 15), '...', parent='overlay')
+        dpg.draw_line((x1 + xmin, y), (x2 + xmin, y), parent='overlay')
 
     def logout(self):
         self.zftp.quit()

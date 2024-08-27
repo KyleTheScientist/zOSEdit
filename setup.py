@@ -17,7 +17,7 @@ readme = Path(__file__).parent / 'README.md'
 
 setup(
     name='zosedit',
-    version='0.0.10',
+    version='0.0.12',
     description='FTP-based MVS Dataset Editor',
     long_description=readme.read_text(),
     long_description_content_type='text/markdown',

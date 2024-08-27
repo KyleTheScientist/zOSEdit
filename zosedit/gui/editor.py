@@ -1,8 +1,10 @@
+import ebcdic
 from dearpygui import dearpygui as dpg
 from zosedit.models import Dataset, Job, Spool
 from zosedit.constants import tempdir
 from zosedit.zftp import zFTP
 from pathlib import Path
+from datetime import datetime
 
 
 class Tab:
@@ -14,6 +16,7 @@ class Tab:
         self.dirty = False
         self.uuid = None
         self.label = None
+        self._line_height = dpg.get_text_size('')[1] + 18
 
         if dataset:
             self.build_dataset_tab()
@@ -36,7 +39,7 @@ class Tab:
         # Setup tab
         dpg.bind_item_theme(self.uuid, 'dataset_tab_theme')
         dpg.set_value('editor_tab_bar', self.uuid)
-        with dpg.child_window(parent=self.uuid, height=dpg.get_text_size('')[1] + 30, horizontal_scrollbar=True):
+        with dpg.child_window(parent=self.uuid, height=self._line_height, border=False, horizontal_scrollbar=True):
             dpg.add_text(str(dataset))
 
         # Get file content
@@ -78,13 +81,15 @@ class Tab:
         dpg.set_value('editor_tab_bar', self.uuid)
 
         # Info/status
-        with dpg.child_window(parent=self.uuid, height=dpg.get_text_size('')[1] + 30, horizontal_scrollbar=True):
+        with dpg.child_window(parent=self.uuid, height=self._line_height, border=False, horizontal_scrollbar=True):
             dpg.add_text(str(self.job))
         status = dpg.add_text('Downloading spool...', parent=self.uuid)
 
         # Create spool dropdowns
+        self.spool_headers = []
         for spool in self.ftp.list_spools(self.job):
             header = dpg.add_collapsing_header(before=status, label=spool.ddname, parent=self.uuid)
+            self.spool_headers.append(header)
             with dpg.item_handler_registry() as reg:
                 dpg.add_item_toggled_open_handler(callback=self._populate_spool, user_data=(header,spool))
             dpg.bind_item_handler_registry(header, reg)
@@ -93,28 +98,49 @@ class Tab:
 
     def _populate_spool(self, sender, data, user_data):
         header, spool = user_data
+        # for h in self.spool_headers:
+        #     dpg.set_value(h, h == header)
 
         if dpg.get_item_children(header)[1]: # Already populated
             return
 
         # Info/status
-        with dpg.child_window(parent=header, height=dpg.get_text_size('')[1] + 30, horizontal_scrollbar=True):
+        with dpg.child_window(parent=header, height=self._line_height, border=False, horizontal_scrollbar=True):
             dpg.add_text(str(spool))
         status = dpg.add_text('Downloading...', parent=header)
         if not self.ftp.download_spool(spool):
-            dpg.configure_item(header, label='Download failed')
+            dpg.configure_item(status, label='Download failed')
             return
         dpg.delete_item(status)
 
         # Display spool
         text = spool.local_path.read_text()
-        w, h = dpg.get_text_size(text)
-        with dpg.child_window(parent=header, height=h + 30, horizontal_scrollbar=True):
-            dpg.add_input_text(multiline=True,
-                               width=w + 50,
-                               height=-1,
-                               default_value=text,
-                               readonly=True)
+        tw, th = dpg.get_text_size(text)
+
+        with dpg.child_window(parent=header,
+                              horizontal_scrollbar=True, border=False) as window:
+            input_field = dpg.add_input_text(multiline=True,
+                                             width=tw + 20,
+                                             height=th + 20,
+                                             default_value=text,
+                                             readonly=True)
+            dpg.bind_item_theme(input_field, 'spool_input_theme')
+        self.resize_spool_window(None, None, (header, window, input_field))
+
+        # Resize window handler
+        with dpg.item_handler_registry() as reg:
+            dpg.add_item_toggled_open_handler(callback=self.resize_spool_window, user_data=(header, window, input_field))
+        dpg.bind_item_handler_registry(header, reg)
+
+    def resize_spool_window(self, sender, data, user_data):
+        print(f'resize_spool_window {datetime.now()}')
+        header, window, input_field = user_data
+        width = dpg.get_item_rect_size(header)[0]
+        text = dpg.get_value(input_field)
+        tw, th = dpg.get_text_size(text)
+        w = min(tw + 34, width - 15)
+        h = min(th + 34, dpg.get_viewport_height() - 220)
+        dpg.configure_item(window, width=w, height=h)
 
     def mark_dirty(self):
         dpg.configure_item(self.uuid, label=self.dataset.name + '*')
@@ -149,6 +175,14 @@ class Editor:
                 dpg.add_theme_color(dpg.mvThemeCol_Tab, (50, 60, 80, 255), category=dpg.mvThemeCat_Core)
                 dpg.add_theme_color(dpg.mvThemeCol_TabActive, (50, 60, 150, 255), category=dpg.mvThemeCat_Core)
                 dpg.add_theme_color(dpg.mvThemeCol_TabHovered, (30, 70, 130, 255), category=dpg.mvThemeCat_Core)
+
+        with dpg.theme(tag='spool_input_theme'):
+            with dpg.theme_component(dpg.mvInputText):
+                dpg.add_theme_style(dpg.mvStyleVar_CellPadding, 0, 0, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0, 0, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0, 0, category=dpg.mvThemeCat_Core)
+
+
 
         with dpg.handler_registry():
             dpg.add_key_press_handler(dpg.mvKey_N, callback=self.new_file_keybind)
@@ -239,7 +273,12 @@ class Editor:
 
         if tab.dirty:
             text: str = dpg.get_value(tab.editor)
-            tab.dataset.local_path.write_text(text)
+
+            result = []
+            for line in text.split('\n'):
+                result.append(line.ljust(tab.dataset.reclength))
+
+            tab.dataset.local_path.write_bytes(''.join(result).encode('cp1047'))
 
             if not self.root.zftp.upload(tab.dataset):
                 return

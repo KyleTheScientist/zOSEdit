@@ -1,5 +1,5 @@
 import re
-
+from pathlib import Path
 
 class Dataset:
     cols = 'volume', 'unit', 'date', 'ext', 'used', 'recformat', 'reclength', 'block_size', 'type', 'name'
@@ -8,6 +8,7 @@ class Dataset:
         self.string = string
         self.member = member
         self.new = False
+        self.local_path : Path = None
 
         self.volume: str = None
         self.unit: int = None
