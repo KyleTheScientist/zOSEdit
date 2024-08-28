@@ -60,8 +60,8 @@ class zFTP:
             print(indent(format_exc(), '    '))
             self.show_error(f'Error listing datasets:\n{e}')
             return []
-        datasets = [Dataset(file_) for file_ in files[1:]]
-        datasets = sorted(datasets, key=lambda x: x.is_partitioned())
+        datasets = [Dataset(file_) for file_ in set(files[1:])]
+        datasets = sorted(datasets, key=lambda x: (x.is_partitioned(), x.name, x.volume or ''))
         return datasets
 
     @waits
@@ -70,7 +70,7 @@ class zFTP:
         def append(line):
             members.append(line.split()[0])
         try:
-            self.set_ftp_vars('SEQ')
+            self.set_ftp_vars('SEQ', VOLUME=dataset.volume)
             self.ftp.dir(f"'{dataset.name}(*)'", append)
         except Exception as e:
             print('Error getting members for', dataset.name)
@@ -87,7 +87,7 @@ class zFTP:
             raw_data.append(data)
 
         try:
-            self.set_ftp_vars('SEQ')
+            self.set_ftp_vars('SEQ', VOLUME=dataset.volume)
             self.ftp.retrlines(f"RETR '{dataset.name}'", write)
             content = '\n'.join(raw_data)
             path = tempdir / dataset.name
@@ -123,7 +123,7 @@ class zFTP:
     @waits
     def delete(self, dataset: Dataset):
         try:
-            self.set_ftp_vars('SEQ')
+            self.set_ftp_vars('SEQ', VOLUME=dataset.volume)
             self.ftp.delete(f"'{dataset.name}'")
             print('Deleted', dataset.name)
         except Exception as e:
@@ -203,7 +203,9 @@ class zFTP:
         if '--------' in raw_data:
             raw_data = ['', raw_data[1] + '  ' + raw_data[-1]]
 
-        return [Job(job_str) for job_str in raw_data[1:]]
+        result = [Job(job_str) for job_str in raw_data[1:]]
+        result.sort(key=lambda job: (job.rc == 'Active', job.id), reverse=True)
+        return result
 
     @waits
     def download_spools(self, job: Job):
@@ -231,7 +233,7 @@ class zFTP:
             self.show_error('\n'.join(errors))
 
     @waits
-    def download_spool(self, spool: Spool):
+    def download_spool(self, spool: Spool) -> bool:
         try:
             path = tempdir / f'{spool.id}.txt'
             lines = []

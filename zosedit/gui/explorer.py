@@ -1,6 +1,7 @@
 import re
 import contextlib
 from dearpygui import dearpygui as dpg
+from zosedit.gui.dialog import dialog
 from zosedit.models import Dataset
 from traceback import format_exc
 from textwrap import indent
@@ -19,7 +20,11 @@ class Explorer:
                 # Datasets tab
                 with dpg.tab(label='Datasets', tag='explorer_datasets_tab'):
                     with dpg.group(horizontal=True, tag='explorer_dataset_search_group'):
-                        dpg.add_input_text(hint='Search', tag='explorer_dataset_input', width=260, **input_options)
+                        input_width = dpg.get_item_width('win_explorer') - 40
+                        dpg.add_input_text(hint='Search',
+                                           tag='explorer_dataset_input',
+                                           width=input_width,
+                                           **input_options)
                         dpg.add_button(label=' O ', callback=self.refresh_datasets)
                     dpg.add_child_window(label='Results', tag='dataset_results')
 
@@ -33,13 +38,21 @@ class Explorer:
                         dpg.add_button(label='Search', callback=self.refresh_jobs)
                     dpg.add_child_window(label='Results', tag='job_results')
 
-        with dpg.theme(tag='rc_theme_fail'):
+        with dpg.theme(tag='explorer_theme_volume'):
+            with dpg.theme_component(dpg.mvSelectable):
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (170, 170, 170, 255))
+
+        with dpg.theme(tag='rc_theme_error'):
             with dpg.theme_component(dpg.mvSelectable):
                 dpg.add_theme_color(dpg.mvThemeCol_Text, (140, 120, 80, 255))
 
         with dpg.theme(tag='rc_theme_success'):
             with dpg.theme_component(dpg.mvSelectable):
                 dpg.add_theme_color(dpg.mvThemeCol_Text, (50, 140, 80, 255))
+
+        with dpg.theme(tag='rc_theme_active'):
+            with dpg.theme_component(dpg.mvSelectable):
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (70, 100, 160, 255))
 
 
     def on_tab_changed(self):
@@ -91,11 +104,11 @@ class Explorer:
                 dpg.add_table_column(label='RC')
                 for job in jobs:
                     with dpg.table_row():
-                        dpg.add_selectable(span_columns=True, label=job.id, callback=self._open_job(job))
-                        dpg.add_selectable(span_columns=True, label=job.name, callback=self._open_job(job))
-                        dpg.add_selectable(span_columns=True, label=job.owner, callback=self._open_job(job))
-                        rc = dpg.add_selectable(span_columns=True, label=job.rc, callback=self._open_job(job))
-                        dpg.bind_item_theme(rc, 'rc_theme_fail' if job.rc else 'rc_theme_success')
+                        dpg.add_selectable(span_columns=True, label=job.id, callback=self.open_job, user_data=job)
+                        dpg.add_selectable(span_columns=True, label=job.name, callback=self.open_job, user_data=job)
+                        dpg.add_selectable(span_columns=True, label=job.owner, callback=self.open_job, user_data=job)
+                        rc = dpg.add_selectable(span_columns=True, label=job.rc, callback=self.open_job, user_data=job)
+                        dpg.bind_item_theme(rc, f'rc_theme_{job.theme()}')
 
     def refresh_datasets(self):
         # Get datasets
@@ -115,20 +128,24 @@ class Explorer:
             dpg.set_value(status, f'Found {len(datasets)} dataset(s)')
 
             # List results
-            with dpg.table(header_row=False, policy=dpg.mvTable_SizingStretchProp):
+            with dpg.table(header_row=True, policy=dpg.mvTable_SizingStretchProp, tag='dataset_results_table'):
+                dpg.add_table_column(label='Volume')
                 dpg.add_table_column(label='Name')
                 for dataset in datasets:
-                    with dpg.table_row():
-                        with dpg.table_cell():
-                            self.entry(dataset, leaf=not dataset.is_partitioned())
+                    self.entry(dataset, leaf=not dataset.is_partitioned())
 
 
-    def entry(self, dataset: Dataset, leaf=False, **kwargs):
-        # Create the button/dropdown for the dataset
-        header = dpg.add_collapsing_header(label=dataset.member or dataset.name, leaf=leaf, **kwargs)
+    def entry(self, dataset: Dataset, leaf: bool, **kwargs):
+        with dpg.table_row(parent='dataset_results_table', **kwargs) as row:
+            with dpg.table_cell():
+                volume = '' if dataset.member else dataset.volume
+                selectable = dpg.add_selectable(label=volume, span_columns=True)
+                dpg.bind_item_theme(selectable, 'explorer_theme_volume')
 
-        # Decide left-click functionality
-        callback = self._open_file(dataset) if leaf else self._populate_pds(dataset, header)
+            with dpg.table_cell():
+                # Create the button/dropdown for the dataset
+                name = dataset.name + '/' if dataset.is_partitioned() else dataset.name
+                dpg.add_selectable(label=dataset.member or name, span_columns=True)
 
         # Create context menu
         dpg.popup
@@ -139,28 +156,46 @@ class Explorer:
             else:
                 dpg.add_menu_item(label='Create member', callback=self._new_member(dataset))
             dpg.add_menu_item(label='Delete', callback=self.try_delete_file, user_data=dataset)
+            dpg.add_menu_item(label='Properties', callback=self.properties_popup, user_data=dataset)
 
         # Add functionality to the button/dropdown
         with dpg.item_handler_registry() as reg:
-            dpg.add_item_clicked_handler(dpg.mvMouseButton_Left, callback=callback)
+            on_left_click = self._open_file(dataset) if leaf else self._populate_pds(dataset, row)
+            dpg.add_item_clicked_handler(dpg.mvMouseButton_Left, callback=on_left_click)
+            dpg.add_item_clicked_handler(dpg.mvMouseButton_Left, callback=lambda: dpg.set_value(selectable, False))
             dpg.add_item_clicked_handler(dpg.mvMouseButton_Right, callback=lambda: dpg.configure_item(context_menu, show=True))
-        dpg.bind_item_handler_registry(header, reg)
+        dpg.bind_item_handler_registry(selectable, reg)
 
-    def populate_pds(self, dataset: Dataset, id: int):
+    def populate_pds(self, dataset: Dataset, parent_row: int):
         if dataset._populated:
+            dataset._populated = False
+            for child in dpg.get_item_children('dataset_results_table')[1]:
+                if dpg.get_item_user_data(child) == dataset:
+                    dpg.delete_item(child)
             return
 
         # Load members
-        status = dpg.add_text('Loading members...', parent=id, indent=10)
+        # status = dpg.add_text('Loading members...', parent=id, indent=10)
         members = self.root.zftp.get_members(dataset)
-        if not members:
-            dpg.set_value(status, 'No members found')
-            return
-        dpg.delete_item(status)
+        # dpg.delete_item(status)
 
+        children = dpg.get_item_children('dataset_results_table')[1]
+        index = children.index(parent_row) + 1
+        if index < len(children):
+            before = children[index]
+        else:
+            before = 0
+
+        if not members:
+            with dpg.table_row(parent='dataset_results_table', before=before, user_data=dataset):
+                dpg.add_table_cell()
+                with dpg.table_cell():
+                    dpg.add_text('<empty>')
+            return
         # List members
         for member in members:
-            self.entry(dataset=dataset(member), leaf=True, parent=id, indent=10)
+            self.entry(dataset=dataset(member), leaf=True, before=before, user_data=dataset)
+
 
     def _populate_pds(self, dataset: Dataset, parent: int):
         return lambda: self.populate_pds(dataset, parent)
@@ -180,10 +215,9 @@ class Explorer:
             self.root.zftp.submit_job(dataset)
         return callback
 
-    def _open_job(self, job):
-        def callback():
-            self.root.editor.open_job(job)
-        return callback
+    def open_job(self, sender, data, job):
+        dpg.set_value(sender, False)
+        self.root.editor.open_job(job)
 
     def try_delete_file(self, sender, data, dataset):
         w, h = 300, 150
@@ -200,6 +234,20 @@ class Explorer:
         self.root.zftp.delete(dataset)
         self.root.editor.close_tab_by_dataset(dataset)
         self.refresh_datasets()
+
+    def properties_popup(self, sender, data, dataset):
+        with dialog(label=dataset.name, tag='properties_dialog', width=500, height=300):
+            properties = dataset.properties()
+            with dpg.table(header_row=True, policy=dpg.mvTable_SizingFixedFit):
+                dpg.add_table_column(label='Property')
+                dpg.add_table_column(label='Value')
+
+                for key, value in properties.items():
+                    with dpg.table_row():
+                        with dpg.table_cell():
+                            dpg.add_text(key.upper())
+                        with dpg.table_cell():
+                            dpg.add_input_text(readonly=True, default_value=value, width=400)
 
     @contextlib.contextmanager
     def empty_results(self, item):

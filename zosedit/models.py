@@ -40,6 +40,10 @@ class Dataset:
             print('Error parsing dataset:', e)
             print(string)
 
+    def properties(self) -> dict:
+        cols = sorted(self.cols)
+        return {col: getattr(self, col) for col in cols}
+
     def is_partitioned(self):
         return self.type == 'PO'
 
@@ -75,6 +79,7 @@ class Job:
             if weirdness:
                 group = weirdness.group()
                 string = string.replace(group, group.replace(' ', '_'))
+            string = string.replace('RC unknown', '?')
 
             for col, value in zip(self.cols, string.split()):
                 setattr(self, col, value)
@@ -86,11 +91,21 @@ class Job:
                         self.rc = int(self.rc)
                 else:
                     self.rc = self.rc.replace('_', '').replace('(', '').replace(')', '')
+            elif self.status == 'ACTIVE':
+                self.rc = self.status.capitalize()
             if self.spool_count is not None:
                 self.spool_count = int(self.spool_count.split()[0])
         except Exception as e:
             print('Error parsing job:', e)
             print(string)
+
+    def theme(self):
+        if self.status == 'ACTIVE':
+            return 'active'
+        rc = '?' if self.rc is None else self.rc
+        if rc == 0:
+            return 'success'
+        return 'error'
 
     def read(self, *args, **kwargs):
         return None

@@ -42,9 +42,8 @@ class Root:
             with dpg.handler_registry():
                 dpg.add_key_press_handler(dpg.mvKey_F1, callback=self.zftp.operator_command_prompt)
 
-            width = dpg.get_viewport_width()
             with dpg.group(horizontal=True):
-                with dpg.child_window(label="Explorer", width=width/4, height=-1, tag='win_explorer', border=False):
+                with dpg.child_window(label="Explorer", width=375, height=-1, tag='win_explorer', border=False):
                     self.explorer.build()
 
                 with dpg.child_window(label="Editor", menubar=False, tag='win_editor', border=False,

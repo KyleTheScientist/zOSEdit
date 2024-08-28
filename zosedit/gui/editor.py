@@ -3,6 +3,7 @@ from dearpygui import dearpygui as dpg
 from zosedit.models import Dataset, Job, Spool
 from zosedit.constants import tempdir
 from zosedit.zftp import zFTP
+from zosedit.gui.dialog import dialog
 from pathlib import Path
 from datetime import datetime
 
@@ -106,10 +107,11 @@ class Tab:
 
         # Info/status
         with dpg.child_window(parent=header, height=self._line_height, border=False, horizontal_scrollbar=True):
-            dpg.add_text(str(spool))
-        status = dpg.add_text('Downloading...', parent=header)
+            dpg.add_text(str(spool), indent=10)
+        status = dpg.add_text('Downloading spool output...', parent=header, indent=10)
         if not self.ftp.download_spool(spool):
-            dpg.configure_item(status, label='Download failed')
+            dpg.set_value(status, 'Download failed')
+            dpg.configure_item(status, color=(255, 255, 0))
             return
         dpg.delete_item(status)
 
@@ -123,7 +125,7 @@ class Tab:
                                              width=tw + 20,
                                              height=th + 20,
                                              default_value=text,
-                                             readonly=True)
+                                             readonly=True,)
             dpg.bind_item_theme(input_field, 'spool_input_theme')
         self.resize_spool_window(None, None, (header, window, input_field))
 
@@ -231,7 +233,7 @@ class Editor:
             dataset_name = dpg.get_value('new_file_dataset_input')
             # reclength = dpg.get_value('new_file_reclength')
             type_ = dpg.get_value('new_file_type')
-            type_ = 'PO' if type_ == 'PDS' else 'PS'
+            type_ = 'PO' if type_ == 'Partitioned' else 'PS'
 
             dataset = Dataset(dataset_name)
             dataset.new = True
@@ -251,20 +253,26 @@ class Editor:
             dpg.delete_item('new_file_dialog')
 
         # Create new dialog
-        w, h = 400, 100
-        with dpg.window(tag='new_file_dialog', width=w, height=h, label='New'):
-            dpg.add_input_text(hint='Dataset Name', tag='new_file_dataset_input', uppercase=True,
-                               on_enter=True, callback=create_file, default_value=name)
+        with dialog(tag='new_file_dialog', width=500, height=100, label='New'):
+            dpg.add_input_text(hint='Dataset Name',
+                               tag='new_file_dataset_input',
+                               width=-1,
+                               uppercase=True,
+                               on_enter=True,
+                               callback=create_file,
+                               default_value=name)
             # dpg.add_input_int(label='Record Length', tag='new_file_record_length', default_value=80, min_value=1, max_value=32767, step=0)
-            dpg.add_combo(label='Type', items=('Normal', 'PDS'), tag='new_file_type', default_value='Normal')
+            dpg.add_radio_button(label='Type',
+                                 items=('Sequential', 'Partitioned'),
+                                 horizontal=True,
+                                 tag='new_file_type',
+                                 default_value='Sequential')
+
             with dpg.group(horizontal=True):
                 dpg.add_button(label='Create', callback=create_file)
                 dpg.add_button(label='Cancel', callback=lambda: dpg.delete_item('new_file_dialog'))
 
-        dpg.focus_item('new_file_dataset_input')
-        # Center dialog
-        vw, vh = dpg.get_viewport_width(), dpg.get_viewport_height()
-        dpg.set_item_pos('new_file_dialog', (vw/2 - w/2, vh/2 - h/2))
+            dpg.focus_item('new_file_dataset_input')
 
     def save_open_file(self):
         tab = self.get_current_tab()
