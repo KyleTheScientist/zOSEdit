@@ -231,15 +231,18 @@ class Editor:
         # Callback for creating a new file
         def create_file():
             dataset_name = dpg.get_value('new_file_dataset_input')
-            # reclength = dpg.get_value('new_file_reclength')
+
             type_ = dpg.get_value('new_file_type')
             type_ = 'PO' if type_ == 'Partitioned' else 'PS'
+            format_ = dpg.get_value('new_file_format')
+            format_ = 'FB' if format_ == 'Fixed Width' else 'VB'
 
             dataset = Dataset(dataset_name)
             dataset.new = True
             dataset.local_path = Path(tempdir, dataset_name)
             dataset.local_path.write_text('')
-            dataset.reclength = 80 # HACK
+            dataset.reclength = dpg.get_value('new_file_record_length')
+            dataset.recformat = format_
             dataset.type = type_
 
             if type_ == 'PO':
@@ -252,8 +255,13 @@ class Editor:
         if dpg.does_item_exist('new_file_dialog'):
             dpg.delete_item('new_file_dialog')
 
+        def on_switch_format():
+            format_ = dpg.get_value('new_file_format')
+            dpg.configure_item('new_file_record_length', show=format_ == 'Fixed Width')
+
         # Create new dialog
-        with dialog(tag='new_file_dialog', width=500, height=100, label='New'):
+        w, h = 500, 200
+        with dialog(tag='new_file_dialog', width=w, height=h, label='New'):
             dpg.add_input_text(hint='Dataset Name',
                                tag='new_file_dataset_input',
                                width=-1,
@@ -261,18 +269,28 @@ class Editor:
                                on_enter=True,
                                callback=create_file,
                                default_value=name)
-            # dpg.add_input_int(label='Record Length', tag='new_file_record_length', default_value=80, min_value=1, max_value=32767, step=0)
-            dpg.add_radio_button(label='Type',
+            dpg.add_combo(label='Type',
                                  items=('Sequential', 'Partitioned'),
-                                 horizontal=True,
                                  tag='new_file_type',
-                                 default_value='Sequential')
+                                 default_value='Sequential',
+                                 width=120)
+            dpg.add_combo(label='Record Format',
+                                 items=('Fixed Width', 'Variable Width'),
+                                 tag='new_file_format',
+                                 default_value='Fixed Width',
+                                 width=120,
+                                 callback=on_switch_format)
+            dpg.add_input_int(label='Record Length', tag='new_file_record_length',
+                              default_value=80, min_value=1, max_value=32767, step=0,
+                              width=120)
 
+            dpg.add_spacer(height=10)
             with dpg.group(horizontal=True):
-                dpg.add_button(label='Create', callback=create_file)
-                dpg.add_button(label='Cancel', callback=lambda: dpg.delete_item('new_file_dialog'))
+                dpg.add_button(label='Create', callback=create_file, width=w / 2 - 13)
+                dpg.add_button(label='Cancel', callback=lambda: dpg.delete_item('new_file_dialog'), width=w / 2 - 12)
 
             dpg.focus_item('new_file_dataset_input')
+
 
     def save_open_file(self):
         tab = self.get_current_tab()
@@ -283,10 +301,12 @@ class Editor:
             text: str = dpg.get_value(tab.editor)
 
             result = []
+            pad_to = tab.dataset.reclength if tab.dataset.recformat == 'FB' else tab.dataset.reclength - 4
             for line in text.split('\n'):
-                result.append(line.ljust(tab.dataset.reclength))
+                result.append(line.ljust(pad_to))
+            text = ''.join(result)
 
-            tab.dataset.local_path.write_bytes(''.join(result).encode('cp1047'))
+            tab.dataset.local_path.write_bytes(text.encode('cp1047'))
 
             if not self.root.zftp.upload(tab.dataset):
                 return

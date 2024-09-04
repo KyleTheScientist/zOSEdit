@@ -101,7 +101,7 @@ class zFTP:
     @waits
     def mkdir(self, dataset: Dataset):
         try:
-            self.set_ftp_vars('SEQ')
+            self.set_ftp_vars('SEQ', RECFM=dataset.recformat, LRECL=dataset.reclength, BLKSIZE=dataset.block_size)
             self.ftp.mkd(f"'{dataset.name}'")
         except Exception as e:
             self.show_error(f'Error creating partitioned dataset:\n{e}')
@@ -173,7 +173,7 @@ class zFTP:
 
         w, h = 420, 150
         with dialog(tag='operator_command_prompt', label='Operator Command', width=w, height=h, modal=False):
-            dpg.add_input_text(label='Command', tag='operator_command_input', hint='/D A,<JOBNAME>',
+            dpg.add_input_text(label='Command', tag='operator_command_input', hint='S <JOBNAME>',
                                on_enter=True, callback=_submit_command)
             dpg.add_spacer(height=5)
 
