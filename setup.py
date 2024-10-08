@@ -17,7 +17,7 @@ readme = Path(__file__).parent / 'README.md'
 
 setup(
     name='zosedit',
-    version='0.0.14',
+    version='0.0.15',
     description='FTP-based MVS Dataset Editor',
     long_description=readme.read_text(),
     long_description_content_type='text/markdown',
@@ -27,6 +27,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'dearpygui',
+        'colorama'
     ],
     entry_points={'console_scripts': ['zosedit=zosedit.main:main']},
     keywords=['editor', 'z/OS', 'MVS', 'dataset', 'FTP'],
