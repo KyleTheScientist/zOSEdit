@@ -11,6 +11,7 @@ import platform
 if platform.system() == 'Windows':
     from os import startfile
 
+
 class Root:
 
     def __init__(self):
@@ -26,7 +27,7 @@ class Root:
         with dpg.window(label="Main", tag='win_main') as main:
             with dpg.menu_bar():
                 with dpg.menu(label="File", tag='file_menu'):
-                    dpg.add_menu_item(label="New", shortcut="Ctrl+N", callback=self.editor.new_file)
+                    dpg.add_menu_item(label="New", shortcut="Ctrl+N", callback=lambda: self.editor.new_dataset_tab())
                     dpg.add_menu_item(label="Save", shortcut="Ctrl+S", callback=self.editor.save_open_file)
                     if platform.system() == 'Windows':
                         dpg.add_menu_item(label="Open Data Directory", callback=self.open_data_directory)
@@ -121,14 +122,16 @@ class Root:
             dpg.add_text('', tag='login_status')
             dpg.focus_item('settings_username_input')
 
-
     def open_data_directory(self):
         startfile(tempdir)
 
+
 root = Root()
+
 
 def main():
     root.start()
+
 
 if __name__ == '__main__':
     main()

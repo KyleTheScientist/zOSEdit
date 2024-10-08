@@ -54,7 +54,6 @@ class Explorer:
             with dpg.theme_component(dpg.mvSelectable):
                 dpg.add_theme_color(dpg.mvThemeCol_Text, (70, 100, 160, 255))
 
-
     def on_tab_changed(self):
         pass
 
@@ -121,7 +120,7 @@ class Explorer:
             else:
                 search = f"'{search}'"
 
-        with self.empty_results('dataset_results'): # Clears existing results
+        with self.empty_results('dataset_results'):  # Clears existing results
             # Search for datasets
             status = dpg.add_text('Searching...')
             datasets = [d for d in self.root.zftp.list_datasets(search) if d.type is not None]
@@ -133,7 +132,6 @@ class Explorer:
                 dpg.add_table_column(label='Name')
                 for dataset in datasets:
                     self.entry(dataset, leaf=not dataset.is_partitioned())
-
 
     def entry(self, dataset: Dataset, leaf: bool, **kwargs):
         with dpg.table_row(parent='dataset_results_table', **kwargs) as row:
@@ -163,7 +161,8 @@ class Explorer:
             on_left_click = self._open_file(dataset) if leaf else self._populate_pds(dataset, row)
             dpg.add_item_clicked_handler(dpg.mvMouseButton_Left, callback=on_left_click)
             dpg.add_item_clicked_handler(dpg.mvMouseButton_Left, callback=lambda: dpg.set_value(selectable, False))
-            dpg.add_item_clicked_handler(dpg.mvMouseButton_Right, callback=lambda: dpg.configure_item(context_menu, show=True))
+            dpg.add_item_clicked_handler(dpg.mvMouseButton_Right,
+                                         callback=lambda: dpg.configure_item(context_menu, show=True))
         dpg.bind_item_handler_registry(selectable, reg)
 
     def populate_pds(self, dataset: Dataset, parent_row: int):
@@ -196,13 +195,13 @@ class Explorer:
         for member in members:
             self.entry(dataset=dataset(member), leaf=True, before=before, user_data=dataset)
 
-
     def _populate_pds(self, dataset: Dataset, parent: int):
         return lambda: self.populate_pds(dataset, parent)
 
     def _new_member(self, dataset: Dataset):
         def callback():
-            self.root.editor.new_file(dataset.name + '()')
+            self.root.editor.new_dataset_tab()
+            self.root.editor.save_as(default_name=dataset.name + '()')
         return callback
 
     def _open_file(self, dataset: Dataset):
@@ -220,7 +219,6 @@ class Explorer:
         self.root.editor.open_job(job)
 
     def try_delete_file(self, sender, data, dataset):
-        w, h = 300, 150
         with dpg.window(modal=True, tag='delete_file_dialog', autosize=True, no_title_bar=True):
             dpg.add_text('Confirm deletion of:', color=(255, 80, 80))
             dpg.add_text(dataset.name, bullet=True)

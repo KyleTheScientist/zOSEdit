@@ -1,44 +1,62 @@
 import re
 from pathlib import Path
 
+
 class Dataset:
     cols = 'volume', 'unit', 'date', 'ext', 'used', 'recformat', 'reclength', 'block_size', 'type', 'name'
 
-    def __init__(self, string, member: str = None):
-        self.string = string
-        self.member = member
-        self.new = False
-        self.local_path : Path = None
-
-        self.volume: str = None
-        self.unit: int = None
-        self.date: str = None
-        self.ext: int = None
-        self.used: int = None
-        self.recformat: str = None
-        self.reclength: int = None
-        self.block_size: int = None
-        self.type: str = None
-        self.name: str = None
-        self._populated = False
+    def parse(string: str, member: str = None) -> 'Dataset':
+        '''Parse an FTP list entry string into a Dataset object'''
+        result = {}
 
         try:
             data = string.split()
-            if len(data) != len(self.cols):
-                self.name = data[-1].replace("'", "")
-                return
+            if len(data) != len(Dataset.cols):
+                name = data[-1].replace("'", "")
+                return Dataset(member=member, name=name)
 
-            for col, value in zip(self.cols, data):
-                setattr(self, col, value)
+            for col, value in zip(Dataset.cols, data):
+                result[col] = value
 
-            self.name = self.name.replace("'", "")
-            if self.member:
-                self.name = f"{self.name}({self.member})"
-
-            self.reclength = int(self.reclength)
+            result['name'] = result['name'].replace("'", "")
+            result['reclength'] = int(result['reclength'])
         except Exception as e:
             print('Error parsing dataset:', e)
             print(string)
+
+        return Dataset(member=member, **result)
+
+    def __init__(self,
+                 name: str = None,
+                 member: str = None,
+                 block_size: str = 32720,
+                 date: str = None,
+                 ext: str = None,
+                 recformat: str = 'FB',
+                 reclength: str = 80,
+                 type: str = 'PS',
+                 unit: int = 3390,
+                 used: str = None,
+                 volume: str = None,
+                 new: bool = False,
+                 local_path: Path = None):
+
+        self.name = f'{name}({member})' if member else name
+        self.member = member
+        self.block_size: int = block_size
+        self.date: str = date
+        self.ext: int = ext
+        self.recformat: str = recformat
+        self.reclength: int = reclength
+        self.type: str = type
+        self.unit: int = unit
+        self.used: int = used
+        self.volume: str = volume
+
+        self.new = new
+        self.parent: str = name
+        self.local_path: Path = local_path
+        self._populated = False
 
     def properties(self) -> dict:
         cols = sorted(self.cols)
@@ -48,16 +66,16 @@ class Dataset:
         return self.type == 'PO'
 
     def __repr__(self):
-        attrs = ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
+        attrs = ', '.join(f"{key}={val}" for key, val in self.properties().items())
         return f"Dataset({attrs})"
 
     def __str__(self):
-        return ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
+        return ', '.join(f"{key}={val}" for key, val in self.properties().items())
 
     def __call__(self, member: str) -> 'Dataset':
         if not member:
             return self
-        dataset = Dataset(self.string, member)
+        dataset = Dataset(member=member, **self.properties())
         return dataset
 
 
@@ -116,6 +134,7 @@ class Job:
 
     def __str__(self):
         return ', '.join(f"{col}={getattr(self, col)}" for col in self.cols)
+
 
 class Spool:
 

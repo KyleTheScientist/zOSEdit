@@ -27,6 +27,7 @@ def waits(func):
         return result
     return wrapper
 
+
 class zFTP:
 
     KEEP_ALIVE_INTERVAL = 60
@@ -46,7 +47,7 @@ class zFTP:
             self.check_alive()
             self.last_keep_alive = time()
 
-    ### Datasets
+    # === Datasets ===
     @waits
     def list_datasets(self, search_string: str):
         files = []
@@ -60,13 +61,14 @@ class zFTP:
             print(indent(format_exc(), '    '))
             self.show_error(f'Error listing datasets:\n{e}')
             return []
-        datasets = [Dataset(file_) for file_ in set(files[1:])]
+        datasets = [Dataset.parse(file_) for file_ in set(files[1:])]
         datasets = sorted(datasets, key=lambda x: (x.is_partitioned(), x.name, x.volume or ''))
         return datasets
 
     @waits
     def get_members(self, dataset: Dataset):
         members = []
+
         def append(line):
             members.append(line.split()[0])
         try:
@@ -82,6 +84,7 @@ class zFTP:
     @waits
     def download(self, dataset: Dataset):
         raw_data = []
+
         # Download file
         def write(data):
             raw_data.append(data)
@@ -131,7 +134,7 @@ class zFTP:
             return False
         return True
 
-    ### Jobs
+    # === Jobs ===
     @waits
     def submit_job(self, dataset: Dataset, download=True):
         try:
@@ -204,7 +207,7 @@ class zFTP:
             raw_data = ['', raw_data[1] + '  ' + raw_data[-1]]
 
         result = [Job(job_str) for job_str in raw_data[1:]]
-        result.sort(key=lambda job: (job.rc == 'Active', job.id), reverse=True)
+        result.sort(key=lambda job: (job.rc == 'Active'), reverse=True)
         return result
 
     @waits
@@ -258,7 +261,7 @@ class zFTP:
 
         return [Spool(spool_str, job) for spool_str in raw_data[4:-1]]
 
-    ### Dialogs
+    # === Dialogs ===
     def show_error(self, message):
         print(indent(message, '    '))
         print(format_exc())
@@ -282,7 +285,7 @@ class zFTP:
         job = self.list_jobs(id=id)[0]
         self.root.editor.open_job(job)
 
-    ### Connection
+    # === Connection ===
     @waits
     def connect(self, host=None, user=None, password=None):
         host = host or self.host
@@ -303,7 +306,7 @@ class zFTP:
         try:
             if self.ftp:
                 self.ftp.voidcmd('NOOP')
-        except Exception as e:
+        except Exception:
             self.quit()
             self.connect()
 
@@ -312,13 +315,11 @@ class zFTP:
         try:
             if self.ftp:
                 self.ftp.quit()
-        except Exception as e:
+        except Exception:
             print('Error quitting')
             print(indent(format_exc(), '    '))
 
-
     def set_ftp_vars(self, mode=Literal['SEQ', 'JES', 'SQL'], **kwargs):
         self.check_alive()
-        args = ' '.join(f"{key}={value}" for key, value in kwargs.items())
-        self.ftp.sendcmd(f'SITE RESET')
+        args = ' '.join(f"{key}={value}" for key, value in kwargs.items() if value is not None)
         self.ftp.sendcmd(f'SITE FILETYPE={mode} {args}')
